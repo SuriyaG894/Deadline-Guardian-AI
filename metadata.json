@@ -1,0 +1,6 @@
+{
+  "name": "Deadline Guardian AI",
+  "description": "An AI-powered productivity companion that actively helps you finish work by creating schedules, tracking progress, predicting failure risk, and launching Rescue Mode.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

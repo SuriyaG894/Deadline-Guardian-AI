@@ -1,0 +1,30 @@
+{
+  "entities": {
+    "Task": {
+      "title": "Task",
+      "description": "Deadline Guardian Task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "deadline": { "type": "string" },
+        "estimatedHours": { "type": "number" },
+        "progress": { "type": "number" },
+        "status": { "type": "string" },
+        "category": { "type": "string" },
+        "priority": { "type": "string" },
+        "difficulty": { "type": "string" },
+        "risk": { "type": "number" },
+        "recommendedStart": { "type": "string" },
+        "createdAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "User tasks"
+    }
+  }
+}
