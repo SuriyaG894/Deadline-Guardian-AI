@@ -33,7 +33,7 @@ function initializeDataStore() {
         email: "suriyaganeshv042001@gmail.com",
         name: "Suriya Ganesh",
         isLoggedIn: true,
-        calendarConnected: true
+        calendarConnected: false
       },
       tasks: [
         {
@@ -1233,18 +1233,72 @@ app.get('/api/analytics', (req, res) => {
     }, 0);
 
   // calculate score based on task completions and low risks
-  let productivityScore = 80;
+  let productivityScore = totalTasks > 0 ? 80 : 100;
   if (totalTasks > 0) {
     const completeRatio = completedTasks / totalTasks;
-    const averageRisk = tasks.reduce((sum: number, t: Task) => sum + (t.status === 'completed' ? 0 : t.risk), 0) / Math.max(1, totalTasks - completedTasks);
+    const pendingTasks = tasks.filter((t: Task) => t.status !== 'completed');
+    const averageRisk = pendingTasks.length > 0
+      ? pendingTasks.reduce((sum: number, t: Task) => sum + (t.risk || 0), 0) / pendingTasks.length
+      : 0;
     productivityScore = Math.round((completeRatio * 50) + ((100 - averageRisk) * 0.5));
-    productivityScore = Math.min(100, Math.max(10, productivityScore));
+    productivityScore = Math.min(100, Math.max(0, productivityScore));
   }
 
   // Categories
   const categoryDistribution: Record<string, number> = {};
   tasks.forEach((t: Task) => {
     categoryDistribution[t.category] = (categoryDistribution[t.category] || 0) + 1;
+  });
+
+  res.json({
+    totalTasks,
+    completedTasks,
+    highRiskCount,
+    focusHoursLogged: Math.round(focusHoursLogged * 10) / 10,
+    productivityScore,
+    categoryDistribution
+  });
+});
+
+// POST aggregated analytics dashboard with custom data
+app.post('/api/analytics', (req, res) => {
+  const store = getData();
+  const reqTasks = req.body?.tasks;
+  const reqEvents = req.body?.calendarEvents;
+
+  const tasks = Array.isArray(reqTasks) ? reqTasks : store.tasks;
+  const calendarEvents = Array.isArray(reqEvents) ? reqEvents : (store.calendarEvents || []);
+
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter((t: any) => t.status === 'completed').length;
+  const highRiskCount = tasks.filter((t: any) => t.status !== 'completed' && t.risk > 70).length;
+
+  // focus hours logged
+  const focusHoursLogged = calendarEvents
+    .filter((e: any) => e.isFocusSession)
+    .reduce((acc: number, cur: any) => {
+      const diffMs = new Date(cur.end).getTime() - new Date(cur.start).getTime();
+      return acc + (diffMs / (1000 * 60 * 60));
+    }, 0);
+
+  // calculate score based on task completions and low risks
+  let productivityScore = totalTasks > 0 ? 80 : 100;
+  if (totalTasks > 0) {
+    const completeRatio = completedTasks / totalTasks;
+    const pendingTasks = tasks.filter((t: any) => t.status !== 'completed');
+    const averageRisk = pendingTasks.length > 0
+      ? pendingTasks.reduce((sum: number, t: any) => sum + (t.risk || 0), 0) / pendingTasks.length
+      : 0;
+    productivityScore = Math.round((completeRatio * 50) + ((100 - averageRisk) * 0.5));
+    productivityScore = Math.min(100, Math.max(0, productivityScore));
+  }
+
+  // Categories
+  const categoryDistribution: Record<string, number> = {};
+  tasks.forEach((t: any) => {
+    if (t.category) {
+      categoryDistribution[t.category] = (categoryDistribution[t.category] || 0) + 1;
+    }
   });
 
   res.json({

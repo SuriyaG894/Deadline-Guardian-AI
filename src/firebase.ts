@@ -219,6 +219,16 @@ export async function saveUserPlan(uid: string, planId: string, planData: any) {
   await setDoc(docRef, { ...planData, id: planId }, { merge: true });
 }
 
+export async function deleteUserPlan(uid: string, planId: string) {
+  if (isDemo(uid)) {
+    const list = getLocalItem<ExecutionPlan[]>(uid, 'executionPlans', []);
+    setLocalItem(uid, 'executionPlans', list.filter(p => p.id !== planId));
+    return;
+  }
+  const docRef = doc(db, 'users', uid, 'executionPlans', planId);
+  await deleteDoc(docRef);
+}
+
 // 5. Progress Logs Collection Schema
 export async function getUserLogs(uid: string): Promise<ProgressLog[]> {
   if (isDemo(uid)) {
@@ -275,6 +285,16 @@ export async function saveUserNotification(uid: string, notifId: string, notifDa
   await setDoc(docRef, { ...notifData, id: notifId }, { merge: true });
 }
 
+export async function deleteUserNotification(uid: string, notifId: string) {
+  if (isDemo(uid)) {
+    const list = getLocalItem<SystemNotification[]>(uid, 'notifications', []);
+    setLocalItem(uid, 'notifications', list.filter(n => n.id !== notifId));
+    return;
+  }
+  const docRef = doc(db, 'users', uid, 'notifications', notifId);
+  await deleteDoc(docRef);
+}
+
 export async function clearUserNotifications(uid: string, notifIds: string[]) {
   if (isDemo(uid)) {
     const list = getLocalItem<SystemNotification[]>(uid, 'notifications', []);
@@ -294,14 +314,21 @@ export async function seedUserData(uid: string, email: string, name: string) {
   const meta = await getUserMetadata(uid);
   if (meta) return; // already seeded
 
+  const isDemoUser = isDemo(uid);
+
   // Create Metadata Document
   await saveUserMetadata(uid, {
     email,
     name,
-    calendarConnected: true,
+    calendarConnected: isDemoUser,
     rescueMode: false,
     googleAccessToken: null
   });
+
+  // Only seed the rest of the mock data for demo sandbox mode
+  if (!isDemoUser) {
+    return;
+  }
 
   // Default tasks
   const twoDays = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];

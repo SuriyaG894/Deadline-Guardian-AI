@@ -37,6 +37,8 @@ import {
   saveUserPlan, 
   deleteUserTask, 
   deleteUserEvent, 
+  deleteUserPlan,
+  deleteUserNotification,
   clearUserNotifications, 
   signInWithGoogleCalendar,
   logoutUser
@@ -48,7 +50,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
 
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [calendarConnected, setCalendarConnected] = useState(true);
+  const [calendarConnected, setCalendarConnected] = useState(false);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -94,7 +96,9 @@ export default function App() {
     async function loadUserData() {
       try {
         const uid = user.uid;
-        const [tasksList, eventsList, notificationsList, plansList, metadata] = await Promise.all([
+        const isDemoUser = uid === 'demo-user';
+        
+        let [tasksList, eventsList, notificationsList, plansList, metadata] = await Promise.all([
           getUserTasks(uid),
           getUserEvents(uid),
           getUserNotifications(uid),
@@ -102,12 +106,45 @@ export default function App() {
           getUserMetadata(uid)
         ]);
 
+        if (!isDemoUser) {
+          const mockTaskIds = ["task-1", "task-2", "task-3"];
+          const mockEventIds = ["cal-1", "cal-2", "cal-focus-1"];
+          const mockPlanIds = ["plan-1"];
+          const mockNotifIds = ["not-1"];
+
+          const hasMockTasks = tasksList.some(t => mockTaskIds.includes(t.id));
+          const hasMockEvents = eventsList.some(e => mockEventIds.includes(e.id));
+          const hasMockPlans = plansList.some(p => mockPlanIds.includes(p.id));
+          const hasMockNotifs = notificationsList.some(n => mockNotifIds.includes(n.id));
+
+          if (hasMockTasks || hasMockEvents || hasMockPlans || hasMockNotifs) {
+            tasksList = tasksList.filter(t => !mockTaskIds.includes(t.id));
+            eventsList = eventsList.filter(e => !mockEventIds.includes(e.id));
+            plansList = plansList.filter(p => !mockPlanIds.includes(p.id));
+            notificationsList = notificationsList.filter(n => !mockNotifIds.includes(n.id));
+
+            if (hasMockTasks) {
+              mockTaskIds.forEach(id => deleteUserTask(uid, id).catch(e => console.error(e)));
+            }
+            if (hasMockEvents) {
+              mockEventIds.forEach(id => deleteUserEvent(uid, id).catch(e => console.error(e)));
+            }
+            if (hasMockPlans) {
+              mockPlanIds.forEach(id => deleteUserPlan(uid, id).catch(e => console.error(e)));
+            }
+            if (hasMockNotifs) {
+              mockNotifIds.forEach(id => deleteUserNotification(uid, id).catch(e => console.error(e)));
+            }
+          }
+        }
+
         setTasks(tasksList as Task[]);
         setEvents(eventsList as CalendarEvent[]);
         setNotifications(notificationsList as SystemNotification[]);
         setUnreadCount(notificationsList.filter(n => !n.read).length);
         setRescueMode(!!metadata?.rescueMode);
-        setCalendarConnected(metadata?.calendarConnected !== false); // Default to true
+        const isConnected = !!metadata?.calendarConnected && (isDemoUser || !!metadata?.googleAccessToken);
+        setCalendarConnected(isConnected);
 
         const validPlans = (plansList || []).filter((p: any) => 
           tasksList.some((t: any) => t.id === p.taskId)
@@ -142,7 +179,7 @@ export default function App() {
         // Disconnect
         const data = await toggleCalendarConnection();
         setCalendarConnected(data.connected);
-        await saveUserMetadata(user.uid, { calendarConnected: false });
+        await saveUserMetadata(user.uid, { calendarConnected: false, googleAccessToken: null });
         
         // Remove existing events from firestore
         const oldEvents = await getUserEvents(user.uid);
@@ -413,14 +450,14 @@ export default function App() {
             </div>
             <div className="py-2">
               <div className="text-4xl font-semibold tracking-tight text-white">
-                {analytics ? analytics.productivityScore : 82}%
+                {analytics ? analytics.productivityScore : 100}%
               </div>
               <div className="text-[10px] text-zinc-400 mt-1 uppercase font-mono tracking-wider">Optimized Capacity</div>
             </div>
             <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
               <div 
                 className="bg-red-600 h-full transition-all duration-500" 
-                style={{ width: `${analytics ? analytics.productivityScore : 82}%` }} 
+                style={{ width: `${analytics ? analytics.productivityScore : 100}%` }} 
               />
             </div>
           </div>
@@ -433,7 +470,7 @@ export default function App() {
             </div>
             <div className="py-2">
               <div className="text-4xl font-semibold tracking-tight text-white">
-                {analytics ? analytics.focusHoursLogged : 5.0}h
+                {analytics ? analytics.focusHoursLogged : 0}h
               </div>
               <div className="text-[10px] text-zinc-400 mt-1 uppercase font-mono tracking-wider">This Week</div>
             </div>
