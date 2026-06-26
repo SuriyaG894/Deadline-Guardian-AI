@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { motion } from 'motion/react';
-import { Calendar, Check, ExternalLink, ShieldCheck, Link2, AlertCircle, Bot } from 'lucide-react';
+import { Calendar, Check, ExternalLink, ShieldCheck, Link2, AlertCircle, Bot, RefreshCw } from 'lucide-react';
 import { CalendarEvent, Task } from '../types';
 
 interface CalendarViewProps {
@@ -16,9 +16,10 @@ interface CalendarViewProps {
   onTriggerCheckin: (taskId: string, sessionTitle: string, eventId?: string) => void;
   error?: { message: string; details?: string; apiDisabled?: boolean } | null;
   onClearError?: () => void;
+  onRefresh?: () => void;
 }
 
-export default function CalendarView({ events, tasks, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError }: CalendarViewProps) {
+export default function CalendarView({ events, tasks, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError, onRefresh }: CalendarViewProps) {
   // Sort events chronologically
   const sortedEvents = [...events].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
@@ -47,6 +48,15 @@ export default function CalendarView({ events, tasks, isConnected, onToggleConne
         <div className="flex items-center gap-2">
           <Calendar className="w-5 h-5 text-red-500" />
           <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-300">Google Calendar Timeline</h3>
+          {isConnected && onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="p-1.5 text-zinc-500 hover:text-zinc-300 hover:bg-[#262626] rounded-xl transition duration-150 cursor-pointer"
+              title="Sync Google Calendar"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
         
         <button
