@@ -11,6 +11,7 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Task, CalendarEvent, ExecutionPlan, ProgressLog, SystemNotification } from './src/types';
 
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 const app = express();

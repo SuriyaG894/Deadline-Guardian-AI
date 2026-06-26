@@ -3,8 +3,8 @@
     "email": "suriyaganeshv042001@gmail.com",
     "name": "Suriya Ganesh",
     "isLoggedIn": true,
-    "calendarConnected": false,
-    "googleAccessToken": null
+    "calendarConnected": true,
+    "googleAccessToken": "ya29.a0AT3oNZ_JOTDinu3m0JeDgttVd8XXEYwDl1v4FeNKwGZhRsIw_1RcyMIHOY6jlkTOov1y7nXXctP_vUfd7dQjlTKvWK5tNdYMMeIFoEimWjnAdcC6XqaofVKksdwoUXN8j4Ve8KZ3PIfSsKE1ePViIOCLxLHAsu_0bUKS9xOHmh80RyQ9ax1hIT-Nsem-SNhgqsKL8Q0hkKp5PAwsZZnbuFhQwYQGzS8rI0golfFK6QaRt3X_eXBUrLDUGQCJbTvhNqjiphWSgyLe1Gx8e_d4o5fve0HqBgaCgYKATYSARMSFQHGX2MiE2z-hNNuo3xx6t5drVUgug0293"
   },
   "tasks": [
     {
@@ -69,6 +69,20 @@
     }
   ],
   "calendarEvents": [
+    {
+      "id": "0dgs9vfcinlslnidlfvh62s75r",
+      "title": "Go to Gym",
+      "start": "2026-06-26T11:30:00+05:30",
+      "end": "2026-06-26T13:00:00+05:30",
+      "isFocusSession": false
+    },
+    {
+      "id": "798ee43eetiuskqub0215eocuh",
+      "title": "Prepare Presentation for AQI",
+      "start": "2026-06-26T14:30:00+05:30",
+      "end": "2026-06-26T15:30:00+05:30",
+      "isFocusSession": false
+    },
     {
       "id": "cal-focus-1",
       "title": "🎯 Focus: Backend Dev",

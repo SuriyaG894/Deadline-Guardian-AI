@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   signInWithPopup, 
+  linkWithPopup,
   GoogleAuthProvider, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword,
@@ -48,11 +49,32 @@ provider.addScope('https://www.googleapis.com/auth/calendar.events');
 
 export const signInWithGoogleCalendar = async (): Promise<string | null> => {
   try {
-    const result = await signInWithPopup(auth, provider);
+    const currentUser = auth.currentUser;
+    let result;
+    if (currentUser) {
+      const isGoogleUser = currentUser.providerData.some(p => p.providerId === GoogleAuthProvider.PROVIDER_ID);
+      if (isGoogleUser) {
+        result = await signInWithPopup(auth, provider);
+      } else {
+        result = await linkWithPopup(currentUser, provider);
+      }
+    } else {
+      result = await signInWithPopup(auth, provider);
+    }
     const credential = GoogleAuthProvider.credentialFromResult(result);
     return credential?.accessToken || null;
-  } catch (error) {
-    console.error('Google Calendar Sign-In error:', error);
+  } catch (error: any) {
+    console.error('Google Calendar Sign-In/Link error:', error);
+    if (error.code === 'auth/provider-already-linked' || error.code === 'auth/credential-already-in-use') {
+      try {
+        const result = await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        return credential?.accessToken || null;
+      } catch (err2) {
+        console.error('Fallback Google Calendar Sign-In error:', err2);
+        throw err2;
+      }
+    }
     throw error;
   }
 };

@@ -174,9 +174,18 @@ export default function App() {
 
   const handleToggleCalendar = async () => {
     if (!user) return;
+    const isDemoUser = user.uid === 'demo-user';
     try {
       if (calendarConnected) {
         // Disconnect
+        if (isDemoUser) {
+          setCalendarConnected(false);
+          await saveUserMetadata(user.uid, { calendarConnected: false, googleAccessToken: null });
+          setEvents([]);
+          refreshAllData();
+          return;
+        }
+        
         const data = await toggleCalendarConnection();
         setCalendarConnected(data.connected);
         await saveUserMetadata(user.uid, { calendarConnected: false, googleAccessToken: null });
@@ -189,6 +198,34 @@ export default function App() {
         setEvents([]);
         refreshAllData();
       } else {
+        // Connect
+        if (isDemoUser) {
+          setCalendarConnected(true);
+          await saveUserMetadata(user.uid, { calendarConnected: true, googleAccessToken: "mock-demo-token" });
+          const defaultEvents = [
+            {
+              id: "cal-1",
+              title: "Team Sync Meeting",
+              start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
+              end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().substring(0, 16),
+              isFocusSession: false
+            },
+            {
+              id: "cal-2",
+              title: "System Design Mock Interview",
+              start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
+              end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString().substring(0, 16),
+              isFocusSession: false
+            }
+          ];
+          for (const ev of defaultEvents) {
+            await saveUserEvent(user.uid, ev.id, ev);
+          }
+          setEvents(defaultEvents);
+          refreshAllData();
+          return;
+        }
+
         // Connect via Google popup
         const token = await signInWithGoogleCalendar();
         if (token) {

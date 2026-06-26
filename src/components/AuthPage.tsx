@@ -262,57 +262,6 @@ export default function AuthPage() {
           </button>
         </div>
 
-        {/* Configuration & Troubleshooting Guide */}
-        <div className="bg-zinc-950/80 border border-[#262626] rounded-2xl p-5 space-y-4 text-xs">
-          <div className="flex items-center gap-2 border-b border-zinc-800/60 pb-2">
-            <span className="text-red-500 font-bold font-mono">🛠️</span>
-            <h3 className="font-bold text-zinc-300 tracking-tight">Firebase & Google Cloud Setup Guide</h3>
-          </div>
-
-          <div className="space-y-3 font-sans text-zinc-400 leading-relaxed">
-            <div className="p-3 bg-red-950/20 border border-red-900/30 rounded-xl space-y-1">
-              <p className="font-bold text-zinc-200 text-[11px] uppercase tracking-wider text-red-500 flex items-center gap-1.5">
-                <span>⚠️</span> Why do you see "You need additional access" in GCP?
-              </p>
-              <p className="text-zinc-300">
-                The auto-generated project <span className="font-mono text-red-400">magnetic-ember-grwfn</span> is created and managed programmatically within the AI Studio secure container organization. 
-                Therefore, external personal Google Accounts (like yours) do not have direct IAM administrator access to view its inner settings in the Google Cloud/Firebase console directly.
-              </p>
-              <div className="pt-2 text-zinc-200 font-semibold">
-                To run the app instantly without any setup or permission blocks:
-                <button 
-                  onClick={handleDemoSignIn}
-                  className="mt-1.5 w-full py-1.5 px-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-lg text-[10px] transition duration-150 text-center uppercase tracking-wider block"
-                >
-                  🚀 Click Here to Enter Demo Sandbox Mode
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <p className="font-bold text-zinc-200 text-[11px] mb-1 uppercase tracking-wider text-zinc-400">
-                Option A: Connect Your Own Firebase/GCP Project (Full Cloud Sync)
-              </p>
-              <p>
-                If you want to view/manage the database console yourself, you can easily link your own project:
-              </p>
-              <ol className="list-decimal list-inside ml-1 mt-1 space-y-1 text-zinc-300">
-                <li>Create a free project in the <a href="https://console.firebase.google.com/" target="_blank" rel="noreferrer" className="text-red-400 hover:underline">Firebase Console</a>.</li>
-                <li>In AI Studio, open the <span className="font-semibold text-white">Settings</span> menu (top right) and paste your custom project credentials.</li>
-                <li>Ask me to redeploy and update your configs!</li>
-              </ol>
-            </div>
-
-            <div className="pt-2 border-t border-zinc-900">
-              <p className="font-bold text-zinc-200 text-[11px] mb-1 uppercase tracking-wider text-zinc-400">
-                Option B: Troubleshooting standard Email Auth (operation-not-allowed)
-              </p>
-              <p>
-                If using a custom project and you receive sign-up errors, ensure <span className="font-semibold text-white">Email/Password</span> sign-in is enabled under <span className="font-semibold text-white">Authentication &gt; Sign-in method</span> in your custom Firebase console.
-              </p>
-            </div>
-          </div>
-        </div>
 
         {/* Dynamic Safeguard Warning */}
         <div className="flex justify-center items-center gap-2 text-[10px] text-zinc-500 font-mono tracking-wide">
