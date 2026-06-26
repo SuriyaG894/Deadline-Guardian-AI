@@ -57,6 +57,7 @@ export default function App() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [activePlan, setActivePlan] = useState<ExecutionPlan | null>(null);
   const [rescueMode, setRescueMode] = useState(false);
+  const [calendarError, setCalendarError] = useState<{ message: string; details?: string; apiDisabled?: boolean } | null>(null);
 
   // Form states
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -179,6 +180,7 @@ export default function App() {
         // Disconnect
         const data = await toggleCalendarConnection();
         setCalendarConnected(data.connected);
+        setCalendarError(null);
         await saveUserMetadata(user.uid, { calendarConnected: false, googleAccessToken: null });
         
         // Remove existing events from firestore
@@ -193,19 +195,35 @@ export default function App() {
         const token = await signInWithGoogleCalendar();
         if (token) {
           const data = await toggleCalendarConnection(token);
+          if (data.error) {
+            setCalendarConnected(false);
+            setCalendarError({
+              message: data.error,
+              details: data.details,
+              apiDisabled: data.apiDisabled
+            });
+            return;
+          }
           setCalendarConnected(data.connected);
+          setCalendarError(null);
           await saveUserMetadata(user.uid, { calendarConnected: true, googleAccessToken: token });
           
           // Save loaded events to firestore
-          for (const ev of data.events) {
-            await saveUserEvent(user.uid, ev.id, ev);
+          if (data.events && Array.isArray(data.events)) {
+            for (const ev of data.events) {
+              await saveUserEvent(user.uid, ev.id, ev);
+            }
+            setEvents(data.events);
           }
-          setEvents(data.events);
           refreshAllData();
         }
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setCalendarError({
+        message: e.message || "An unexpected error occurred while connecting Google Calendar.",
+        apiDisabled: e.message?.includes("API is not enabled") || false
+      });
     }
   };
 
@@ -648,6 +666,8 @@ export default function App() {
             isConnected={calendarConnected}
             onToggleConnect={handleToggleCalendar}
             onTriggerCheckin={handleTriggerCheckIn}
+            error={calendarError}
+            onClearError={() => setCalendarError(null)}
           />
 
           {/* AI Session execution plans review */}

@@ -454,23 +454,41 @@ async function fetchGoogleCalendarEvents(accessToken: string) {
       }
     );
     if (!response.ok) {
-      console.error("Failed to fetch from Google Calendar API:", response.status, await response.text());
-      return null;
+      const errText = await response.text();
+      console.error("Failed to fetch from Google Calendar API:", response.status, errText);
+      let isApiDisabled = false;
+      if (
+        errText.includes("calendar-json.googleapis.com") || 
+        errText.includes("has not been used in project") || 
+        errText.includes("accessNotConfigured") ||
+        response.status === 403
+      ) {
+        isApiDisabled = true;
+      }
+      return {
+        success: false,
+        error: `Failed to fetch from Google Calendar API: ${response.status}`,
+        details: errText,
+        apiDisabled: isApiDisabled
+      };
     }
     const data: any = await response.json();
+    const events: any[] = [];
     if (data && data.items) {
-      return data.items.map((item: any) => ({
-        id: item.id,
-        title: item.summary || 'No Title',
-        start: item.start?.dateTime || item.start?.date || new Date().toISOString(),
-        end: item.end?.dateTime || item.end?.date || new Date().toISOString(),
-        isFocusSession: false,
-      }));
+      for (const item of data.items) {
+        events.push({
+          id: item.id,
+          title: item.summary || 'No Title',
+          start: item.start?.dateTime || item.start?.date || new Date().toISOString(),
+          end: item.end?.dateTime || item.end?.date || new Date().toISOString(),
+          isFocusSession: false,
+        });
+      }
     }
-    return [];
-  } catch (err) {
+    return { success: true, events };
+  } catch (err: any) {
     console.error("Error calling Google Calendar API:", err);
-    return null;
+    return { success: false, error: err.message || "Unknown error calling Calendar API" };
   }
 }
 
@@ -480,13 +498,22 @@ async function fetchGoogleCalendarEvents(accessToken: string) {
 app.get('/api/calendar/events', async (req, res) => {
   const store = getData();
   if (store.user.calendarConnected && store.user.googleAccessToken) {
-    const realEvents = await fetchGoogleCalendarEvents(store.user.googleAccessToken);
-    if (realEvents !== null) {
+    const result = await fetchGoogleCalendarEvents(store.user.googleAccessToken);
+    if (result.success && result.events) {
+      const realEvents = result.events;
       const focusEvents = store.calendarEvents.filter((e: any) => e.isFocusSession);
       const nonFocusIds = new Set(realEvents.map((e: any) => e.id));
       const filteredFocus = focusEvents.filter((e: any) => !nonFocusIds.has(e.id));
       store.calendarEvents = [...realEvents, ...filteredFocus];
       writeData(store);
+    } else if (!result.success) {
+      return res.json({
+        connected: store.user.calendarConnected,
+        events: store.calendarEvents,
+        error: result.error,
+        details: result.details,
+        apiDisabled: result.apiDisabled
+      });
     }
   }
   res.json({
@@ -500,8 +527,9 @@ app.post('/api/calendar/connect', async (req, res) => {
   const store = getData();
   
   if (accessToken) {
-    const realEvents = await fetchGoogleCalendarEvents(accessToken);
-    if (realEvents !== null) {
+    const result = await fetchGoogleCalendarEvents(accessToken);
+    if (result.success && result.events) {
+      const realEvents = result.events;
       store.user.calendarConnected = true;
       store.user.googleAccessToken = accessToken;
       
@@ -513,7 +541,12 @@ app.post('/api/calendar/connect', async (req, res) => {
       writeData(store);
       res.json({ connected: true, events: store.calendarEvents });
     } else {
-      res.status(400).json({ error: "Failed to authenticate Google Calendar with provided token" });
+      res.status(400).json({ 
+        connected: false,
+        error: result.error || "Failed to authenticate Google Calendar with provided token",
+        details: result.details,
+        apiDisabled: result.apiDisabled
+      });
     }
   } else {
     store.user.calendarConnected = false;
@@ -1206,10 +1239,76 @@ Return a JSON response matching:
     intent = "plan_day";
     reply = "Your calendar is synced. I suggest tackling the High-Risk tasks first during your prime morning focus windows. Shall I generate a custom session roadmap?";
   } else {
-    // general advice
-    const pendingCount = currentTasks.filter((t: any) => t.status !== 'completed').length;
-    const highRiskCount = currentTasks.filter((t: any) => t.risk > 70).length;
-    reply = `Hi! I'm your Deadline Guardian AI Chief of Staff. You currently have ${pendingCount} pending tasks with ${highRiskCount} marked as High Risk. I recommend dedicating 2 hours of focus time today to mitigate your risk. Let me know how I can assist!`;
+    // general advice fallback - dynamically analyze calendar events and tasks
+    const pendingCount = (currentTasks || []).filter((t: any) => t.status !== 'completed').length;
+    const highRiskCount = (currentTasks || []).filter((t: any) => t.risk > 70).length;
+
+    // Check if user mentioned "gym", "workout", or similar
+    const isGymMentioned = lowercaseMsg.includes("gym") || lowercaseMsg.includes("workout") || lowercaseMsg.includes("fitness") || lowercaseMsg.includes("exercise");
+    const gymEvents = (currentEvents || []).filter((evt: any) => {
+      const title = (evt.title || "").toLowerCase();
+      return title.includes("gym") || title.includes("workout") || title.includes("fitness") || title.includes("exercise");
+    });
+
+    // Check if user mentioned any other specific event by title
+    const matchedEvents = (currentEvents || []).filter((evt: any) => {
+      const title = (evt.title || "").toLowerCase();
+      return title.split(" ").some((word: string) => word.length > 2 && lowercaseMsg.includes(word));
+    });
+
+    if (isGymMentioned && gymEvents.length > 0) {
+      const gymEvt = gymEvents[0];
+      const formatTime = (isoString: string) => {
+        try {
+          const d = new Date(isoString);
+          return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        } catch {
+          return isoString;
+        }
+      };
+      const startStr = formatTime(gymEvt.start);
+      const endStr = formatTime(gymEvt.end);
+      reply = `I see you have "${gymEvt.title}" scheduled from ${startStr} to ${endStr} today on your Google Calendar. I have protected that slot on your timeline to ensure no focus conflicts occur! Let me know if you want to schedule focus windows before or after it.`;
+    } else if (matchedEvents.length > 0) {
+      const firstEvt = matchedEvents[0];
+      const formatTime = (isoString: string) => {
+        try {
+          const d = new Date(isoString);
+          return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        } catch {
+          return isoString;
+        }
+      };
+      const startStr = formatTime(firstEvt.start);
+      const endStr = formatTime(firstEvt.end);
+      reply = `I found "${firstEvt.title}" on your calendar today from ${startStr} to ${endStr}. This time is blocked on your timeline. Let me know if you need to plan focus blocks around it!`;
+    } else if (lowercaseMsg.includes("today") || lowercaseMsg.includes("calendar") || lowercaseMsg.includes("event") || lowercaseMsg.includes("schedule")) {
+      const todayEvents = (currentEvents || []).filter((evt: any) => {
+        try {
+          const startDay = new Date(evt.start).toISOString().split('T')[0];
+          const todayDay = new Date().toISOString().split('T')[0];
+          return startDay === todayDay;
+        } catch {
+          return true;
+        }
+      });
+
+      if (todayEvents.length > 0) {
+        const list = todayEvents.map((e: any) => {
+          try {
+            const t = new Date(e.start).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+            return `"${e.title}" at ${t}`;
+          } catch {
+            return `"${e.title}"`;
+          }
+        }).join(", ");
+        reply = `Your calendar is fully synced. For today, you have: ${list}. I have automatically protected these slots on your timeline. Let me know if you'd like to map some focus sessions!`;
+      } else {
+        reply = `You have no standard events scheduled on your calendar today, leaving your day completely open for focus sessions. Shall we set up a plan?`;
+      }
+    } else {
+      reply = `Hi! I'm your Deadline Guardian AI Chief of Staff. You currently have ${pendingCount} pending tasks with ${highRiskCount} marked as High Risk. I recommend dedicating 2 hours of focus time today to mitigate your risk. Let me know how I can assist!`;
+    }
   }
 
   res.json({ reply, intent, effect, storeState: isStateless ? null : store });
