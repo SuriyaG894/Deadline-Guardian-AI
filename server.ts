@@ -590,15 +590,42 @@ function computeSessionStartAndEnd(
   };
 }
 
+// Keep track of tokens that are forbidden (403) from Google Tasks API to avoid console spam and unnecessary API calls.
+const disabledTasksApiTokens = new Set<string>();
+
+// Decodes a base64url encoded string (common for Google Task IDs) to its raw representation.
+function decodeBase64Url(str: string): string {
+  let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) {
+    base64 += '=';
+  }
+  try {
+    return Buffer.from(base64, 'base64').toString('utf8');
+  } catch (e) {
+    return str;
+  }
+}
+
 // Helper to fetch completed tasks from Google Tasks API
 async function fetchCompletedGoogleTasks(accessToken: string): Promise<Set<string>> {
   const completedTaskIds = new Set<string>();
+  if (disabledTasksApiTokens.has(accessToken)) {
+    return completedTaskIds;
+  }
+
   try {
     const listsResponse = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
     if (!listsResponse.ok) {
-      console.warn("Failed to fetch Google Task lists:", listsResponse.status);
+      if (listsResponse.status === 403) {
+        console.warn("Failed to fetch Google Task lists (403 Forbidden). This usually means the Google Tasks API is not enabled in your Google Cloud Project or the 'https://www.googleapis.com/auth/tasks.readonly' scope is not approved. Subsequent fetches for this token will be skipped to avoid log spam.");
+        disabledTasksApiTokens.add(accessToken);
+      } else if (listsResponse.status === 401) {
+        console.warn("Failed to fetch Google Task lists (401 Unauthorized). The access token might be expired or invalid.");
+      } else {
+        console.warn("Failed to fetch Google Task lists:", listsResponse.status);
+      }
       return completedTaskIds;
     }
     const listsData: any = await listsResponse.json();
@@ -613,6 +640,7 @@ async function fetchCompletedGoogleTasks(accessToken: string): Promise<Set<strin
             for (const task of tasksData.items) {
               if (task.status === 'completed') {
                 completedTaskIds.add(task.id);
+                completedTaskIds.add(decodeBase64Url(task.id));
               }
             }
           }
@@ -703,9 +731,16 @@ async function fetchGoogleCalendarEvents(accessToken: string) {
 // Calendar endpoints
 // -----------------------------------------------------
 app.get('/api/calendar/events', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  let token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
   const store = getData();
-  if (store.user.calendarConnected && store.user.googleAccessToken) {
-    const result = await fetchGoogleCalendarEvents(store.user.googleAccessToken);
+  
+  if (!token) {
+    token = store.user.googleAccessToken;
+  }
+
+  if (store.user.calendarConnected && token) {
+    const result = await fetchGoogleCalendarEvents(token);
     if (result.success && result.events) {
       const realEvents = result.events;
       const focusEvents = store.calendarEvents.filter((e: any) => e.isFocusSession);
@@ -738,7 +773,7 @@ app.post('/api/calendar/connect', async (req, res) => {
     if (result.success && result.events) {
       const realEvents = result.events;
       store.user.calendarConnected = true;
-      store.user.googleAccessToken = accessToken;
+      // Do not store the googleAccessToken in data-store.json (local disk storage)
       
       const focusEvents = store.calendarEvents.filter((e: any) => e.isFocusSession);
       const nonFocusIds = new Set(realEvents.map((e: any) => e.id));
@@ -757,7 +792,6 @@ app.post('/api/calendar/connect', async (req, res) => {
     }
   } else {
     store.user.calendarConnected = false;
-    store.user.googleAccessToken = null;
     store.calendarEvents = store.calendarEvents.filter((e: any) => e.isFocusSession);
     writeData(store);
     res.json({ connected: false, events: store.calendarEvents });

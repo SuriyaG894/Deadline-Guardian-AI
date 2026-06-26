@@ -43,8 +43,12 @@ export async function deleteTask(id: string): Promise<{ success: boolean }> {
   return res.json();
 }
 
-export async function fetchCalendarEvents(): Promise<{ connected: boolean; events?: CalendarEvent[]; error?: string; apiDisabled?: boolean; details?: string }> {
-  const res = await fetch('/api/calendar/events');
+export async function fetchCalendarEvents(accessToken?: string): Promise<{ connected: boolean; events?: CalendarEvent[]; error?: string; apiDisabled?: boolean; details?: string }> {
+  const headers: HeadersInit = {};
+  if (accessToken) {
+    headers['Authorization'] = `Bearer ${accessToken}`;
+  }
+  const res = await fetch('/api/calendar/events', { headers });
   return res.json();
 }
 

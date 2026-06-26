@@ -112,7 +112,7 @@ export default function App() {
 
         if (isConnected && !isDemoUser) {
           try {
-            const syncResult = await fetchCalendarEvents();
+            const syncResult = await fetchCalendarEvents(metadata?.googleAccessToken);
             if (syncResult && syncResult.error) {
               if (syncResult.error.includes("401") || syncResult.error.includes("Invalid Credentials") || syncResult.error.includes("authError")) {
                 console.warn("Google Calendar access token expired or invalid. Auto-disconnecting...");
@@ -142,18 +142,17 @@ export default function App() {
                   const titleChanged = localEvt.title !== apiEvt.title;
                   const startChanged = localEvt.start !== apiEvt.start;
                   const endChanged = localEvt.end !== apiEvt.end;
+                  const checkedInChanged = localEvt.checkedIn !== apiEvt.checkedIn;
+                  const checkInStatusChanged = localEvt.checkInStatus !== apiEvt.checkInStatus;
 
-                  if (titleChanged || startChanged || endChanged) {
+                  if (titleChanged || startChanged || endChanged || checkedInChanged || checkInStatusChanged) {
                     const updatedFields: Partial<CalendarEvent> = {
                       title: apiEvt.title,
                       start: apiEvt.start,
-                      end: apiEvt.end
+                      end: apiEvt.end,
+                      checkedIn: apiEvt.checkedIn ?? false,
+                      checkInStatus: apiEvt.checkInStatus
                     };
-                    const checkmarkRegex = /^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])/i;
-                    if (checkmarkRegex.test(apiEvt.title) && !localEvt.checkedIn) {
-                      updatedFields.checkedIn = true;
-                      updatedFields.checkInStatus = 'completed';
-                    }
                     await saveUserEvent(uid, apiEvt.id, updatedFields);
                     Object.assign(localEvt, updatedFields);
                     changed = true;
@@ -165,13 +164,10 @@ export default function App() {
                     start: apiEvt.start,
                     end: apiEvt.end,
                     isFocusSession: !!apiEvt.isFocusSession,
-                    taskId: apiEvt.taskId
+                    taskId: apiEvt.taskId,
+                    checkedIn: apiEvt.checkedIn ?? false,
+                    checkInStatus: apiEvt.checkInStatus
                   };
-                  const checkmarkRegex = /^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])/i;
-                  if (checkmarkRegex.test(apiEvt.title)) {
-                    newEvt.checkedIn = true;
-                    newEvt.checkInStatus = 'completed';
-                  }
                   await saveUserEvent(uid, apiEvt.id, newEvt);
                   eventsList.push(newEvt);
                   changed = true;
@@ -295,13 +291,23 @@ export default function App() {
     loadUserData();
   }, [user, refreshTrigger]);
 
-  // Real-time Google Calendar Polling (every 30 seconds)
+  // Cost-effective Google Calendar Polling (every 10 minutes) & Sync on Tab Focus
   useEffect(() => {
     if (!user) return;
+    
     const pollInterval = setInterval(() => {
       refreshAllData();
-    }, 30000);
-    return () => clearInterval(pollInterval);
+    }, 600000); // 10 minutes
+
+    const handleFocus = () => {
+      refreshAllData();
+    };
+    window.addEventListener('focus', handleFocus);
+
+    return () => {
+      clearInterval(pollInterval);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [user]);
 
   // Background Checker for Notification Bomb (every 10 seconds)
@@ -590,6 +596,10 @@ export default function App() {
   const handleAcknowledgeEvent = async (eventId: string, notificationId: string) => {
     if (!user) return;
     try {
+      // Optimistically remove notification from UI immediately
+      setNotifications(prev => prev.filter(n => n.id !== notificationId));
+      setUnreadCount(prev => Math.max(0, prev - 1));
+
       const updatedEvents = events.map(ev => {
         if (ev.id === eventId) {
           const uEvt = { ...ev, acknowledged: true };
@@ -687,73 +697,78 @@ export default function App() {
                 )}
               </button>
               
-              {/* Dropdown list */}
-              <div className="absolute right-0 mt-2 w-80 bg-[#111114] border border-[#262626] rounded-2xl shadow-2xl opacity-0 translate-y-1 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 group-hover:pointer-events-auto transition duration-200 z-50 p-4 space-y-2">
-                <div className="flex items-center justify-between border-b border-[#262626] pb-2">
-                  <span className="text-xs font-bold text-white uppercase tracking-wider">Guardian Alerts</span>
-                  {unreadCount > 0 && (
-                    <button onClick={handleClearNotifications} className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer uppercase tracking-wider font-semibold">
-                      Mark all read
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-2 max-h-[220px] overflow-y-auto scrollbar-none">
-                  {notifications.length > 0 ? (
-                    notifications.map(n => (
-                      <div key={n.id} className={`p-2.5 rounded-xl border text-[11px] space-y-2 ${
-                        n.type === 'rescue' 
-                          ? 'bg-red-950/20 border-red-900/40 text-red-300' 
-                          : n.type === 'warning'
-                          ? 'bg-amber-950/20 border-amber-900/40 text-amber-300'
-                          : 'bg-zinc-900 border-[#262626] text-zinc-300'
-                      }`}>
-                        <p className="font-semibold leading-relaxed">{n.message}</p>
-                        <div className="flex items-center justify-between gap-2 mt-1">
-                          <span className="text-[9px] text-zinc-500 font-mono">
-                            {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                          
-                          {n.eventId && (
-                            <div className="flex gap-1.5">
-                              {n.isTaskCompletionPrompt ? (
-                                <button
-                                  onClick={async () => {
-                                    await handleMarkComplete(n.eventId!);
-                                    await deleteUserNotification(user!.uid, n.id);
-                                    refreshAllData();
-                                  }}
-                                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
-                                >
-                                  Mark Complete
-                                </button>
-                              ) : n.isPostSessionPrompt ? (
-                                <button
-                                  onClick={() => {
-                                    const evt = events.find(e => e.id === n.eventId);
-                                    if (evt && evt.taskId) {
-                                      handleTriggerCheckIn(evt.taskId, evt.title, evt.id);
-                                    }
-                                  }}
-                                  className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
-                                >
-                                  Check-in
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => handleAcknowledgeEvent(n.eventId!, n.id)}
-                                  className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
-                                >
-                                  Got It
-                                </button>
-                              )}
-                            </div>
-                          )}
+              {/* Dropdown list wrapper with pt-2 to bridge the hover gap */}
+              <div className="absolute right-0 top-full pt-2 w-80 pointer-events-none group-hover:pointer-events-auto opacity-0 group-hover:opacity-100 group-hover:translate-y-0 translate-y-1 transition duration-200 z-50">
+                <div className="bg-[#111114] border border-[#262626] rounded-2xl shadow-2xl p-4 space-y-2">
+                  <div className="flex items-center justify-between border-b border-[#262626] pb-2">
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">Guardian Alerts</span>
+                    {unreadCount > 0 && (
+                      <button onClick={handleClearNotifications} className="text-[10px] text-red-400 hover:text-red-300 cursor-pointer uppercase tracking-wider font-semibold">
+                        Mark all read
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-2 max-h-[220px] overflow-y-auto scrollbar-none">
+                    {notifications.length > 0 ? (
+                      notifications.map(n => (
+                        <div key={n.id} className={`p-2.5 rounded-xl border text-[11px] space-y-2 ${
+                          n.type === 'rescue' 
+                            ? 'bg-red-950/20 border-red-900/40 text-red-300' 
+                            : n.type === 'warning'
+                            ? 'bg-amber-950/20 border-amber-900/40 text-amber-300'
+                            : 'bg-zinc-900 border-[#262626] text-zinc-300'
+                        }`}>
+                          <p className="font-semibold leading-relaxed">{n.message}</p>
+                          <div className="flex items-center justify-between gap-2 mt-1">
+                            <span className="text-[9px] text-zinc-500 font-mono">
+                              {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            
+                            {n.eventId && (
+                              <div className="flex gap-1.5">
+                                {n.isTaskCompletionPrompt ? (
+                                  <button
+                                    onClick={async () => {
+                                      // Optimistically remove notification immediately
+                                      setNotifications(prev => prev.filter(notif => notif.id !== n.id));
+                                      setUnreadCount(prev => Math.max(0, prev - 1));
+                                      await handleMarkComplete(n.eventId!);
+                                      await deleteUserNotification(user!.uid, n.id);
+                                      refreshAllData();
+                                    }}
+                                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
+                                  >
+                                    Mark Complete
+                                  </button>
+                                ) : n.isPostSessionPrompt ? (
+                                  <button
+                                    onClick={() => {
+                                      const evt = events.find(e => e.id === n.eventId);
+                                      if (evt && evt.taskId) {
+                                        handleTriggerCheckIn(evt.taskId, evt.title, evt.id);
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
+                                  >
+                                    Check-in
+                                  </button>
+                                ) : (
+                                  <button
+                                    onClick={() => handleAcknowledgeEvent(n.eventId!, n.id)}
+                                    className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
+                                  >
+                                    Got It
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-xs text-zinc-500 text-center py-4">No active warnings.</p>
-                  )}
+                      ))
+                    ) : (
+                      <p className="text-xs text-zinc-500 text-center py-4">No active warnings.</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1029,6 +1044,7 @@ export default function App() {
             onTriggerCheckin={handleTriggerCheckIn}
             error={calendarError}
             onClearError={() => setCalendarError(null)}
+            onRefresh={refreshAllData}
           />
 
           {/* AI Session execution plans review */}
