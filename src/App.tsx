@@ -64,7 +64,8 @@ export default function App() {
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
   // Check-in modal states
-  const [checkInTask, setCheckInTask] = useState<{ id: string; title: string } | null>(null);
+  const [checkInTask, setCheckInTask] = useState<{ id: string; title: string; eventId?: string } | null>(null);
+  const [bombFrequency, setBombFrequency] = useState<number>(5);
 
   // Refresh data trigger
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -106,6 +107,92 @@ export default function App() {
           getUserPlans(uid),
           getUserMetadata(uid)
         ]);
+
+        const isConnected = !!metadata?.calendarConnected && (isDemoUser || !!metadata?.googleAccessToken);
+
+        if (isConnected && !isDemoUser) {
+          try {
+            const syncResult = await fetchCalendarEvents();
+            if (syncResult && syncResult.error) {
+              if (syncResult.error.includes("401") || syncResult.error.includes("Invalid Credentials") || syncResult.error.includes("authError")) {
+                console.warn("Google Calendar access token expired or invalid. Auto-disconnecting...");
+                setCalendarConnected(false);
+                setCalendarError({
+                  message: "Google Calendar session expired. Please reconnect to sync your events.",
+                });
+                await saveUserMetadata(uid, { calendarConnected: false, googleAccessToken: null });
+                await toggleCalendarConnection().catch(e => console.error(e));
+              } else {
+                setCalendarError({
+                  message: syncResult.error,
+                  details: syncResult.details,
+                  apiDisabled: syncResult.apiDisabled
+                });
+              }
+            } else if (syncResult && syncResult.events && Array.isArray(syncResult.events)) {
+              setCalendarError(null);
+              const apiEvents = syncResult.events;
+              const localEventsMap = new Map(eventsList.map(e => [e.id, e]));
+              const apiEventsMap = new Map(apiEvents.map(e => [e.id, e]));
+              let changed = false;
+
+              for (const apiEvt of apiEvents) {
+                const localEvt = localEventsMap.get(apiEvt.id);
+                if (localEvt) {
+                  const titleChanged = localEvt.title !== apiEvt.title;
+                  const startChanged = localEvt.start !== apiEvt.start;
+                  const endChanged = localEvt.end !== apiEvt.end;
+
+                  if (titleChanged || startChanged || endChanged) {
+                    const updatedFields: Partial<CalendarEvent> = {
+                      title: apiEvt.title,
+                      start: apiEvt.start,
+                      end: apiEvt.end
+                    };
+                    const checkmarkRegex = /^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])/i;
+                    if (checkmarkRegex.test(apiEvt.title) && !localEvt.checkedIn) {
+                      updatedFields.checkedIn = true;
+                      updatedFields.checkInStatus = 'completed';
+                    }
+                    await saveUserEvent(uid, apiEvt.id, updatedFields);
+                    Object.assign(localEvt, updatedFields);
+                    changed = true;
+                  }
+                } else {
+                  const newEvt: CalendarEvent = {
+                    id: apiEvt.id,
+                    title: apiEvt.title,
+                    start: apiEvt.start,
+                    end: apiEvt.end,
+                    isFocusSession: !!apiEvt.isFocusSession,
+                    taskId: apiEvt.taskId
+                  };
+                  const checkmarkRegex = /^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])/i;
+                  if (checkmarkRegex.test(apiEvt.title)) {
+                    newEvt.checkedIn = true;
+                    newEvt.checkInStatus = 'completed';
+                  }
+                  await saveUserEvent(uid, apiEvt.id, newEvt);
+                  eventsList.push(newEvt);
+                  changed = true;
+                }
+              }
+
+              for (const localEvt of eventsList) {
+                if (!localEvt.isFocusSession && !apiEventsMap.has(localEvt.id)) {
+                  await deleteUserEvent(uid, localEvt.id);
+                  changed = true;
+                }
+              }
+
+              if (changed) {
+                eventsList = await getUserEvents(uid);
+              }
+            }
+          } catch (syncErr) {
+            console.error("Error syncing Google Calendar events in loadUserData:", syncErr);
+          }
+        }
 
         if (!isDemoUser) {
           const mockTaskIds = ["task-1", "task-2", "task-3"];
@@ -150,6 +237,22 @@ export default function App() {
           eventsList = eventsList.filter(e => !e.isFocusSession || !e.taskId || validTaskIds.has(e.taskId));
         }
 
+        // Parse event title checkmarks/completed tags to sync Google Calendar completion
+        let updatedEventsAny = false;
+        const parsedEventsList = eventsList.map(evt => {
+          const hasCheckmark = /^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])/i.test(evt.title);
+          if (hasCheckmark && !evt.checkedIn) {
+            evt.checkedIn = true;
+            evt.checkInStatus = 'completed';
+            updatedEventsAny = true;
+            saveUserEvent(uid, evt.id, { checkedIn: true, checkInStatus: 'completed' }).catch(e => console.error(e));
+          }
+          return evt;
+        });
+        if (updatedEventsAny) {
+          eventsList = parsedEventsList;
+        }
+
         const orphanedPlans = plansList.filter(p => p.taskId && !validTaskIds.has(p.taskId));
         if (orphanedPlans.length > 0) {
           for (const p of orphanedPlans) {
@@ -163,7 +266,7 @@ export default function App() {
         setNotifications(notificationsList as SystemNotification[]);
         setUnreadCount(notificationsList.filter(n => !n.read).length);
         setRescueMode(!!metadata?.rescueMode);
-        const isConnected = !!metadata?.calendarConnected && (isDemoUser || !!metadata?.googleAccessToken);
+        setBombFrequency(metadata?.bombFrequency || 5);
         setCalendarConnected(isConnected);
 
         const validPlans = (plansList || []).filter((p: any) => 
@@ -191,6 +294,96 @@ export default function App() {
 
     loadUserData();
   }, [user, refreshTrigger]);
+
+  // Real-time Google Calendar Polling (every 30 seconds)
+  useEffect(() => {
+    if (!user) return;
+    const pollInterval = setInterval(() => {
+      refreshAllData();
+    }, 30000);
+    return () => clearInterval(pollInterval);
+  }, [user]);
+
+  // Background Checker for Notification Bomb (every 10 seconds)
+  useEffect(() => {
+    if (!user) return;
+    const checkInterval = setInterval(() => {
+      const now = new Date();
+      const nowTime = now.getTime();
+      
+      let changedEvents = false;
+      const updatedEvents = events.map(evt => {
+        const startTime = new Date(evt.start).getTime();
+        const endTime = new Date(evt.end).getTime();
+        
+        // 1. Pre-session Notification Bomb (15m before event start)
+        const timeToStart = startTime - nowTime;
+        const fifteenMinutes = 15 * 60 * 1000;
+        
+        if (timeToStart > 0 && timeToStart <= fifteenMinutes && !evt.checkedIn && !evt.acknowledged) {
+          const freqMs = bombFrequency * 60 * 1000;
+          const lastBomb = evt.lastBombTime ? new Date(evt.lastBombTime).getTime() : 0;
+          if (nowTime - lastBomb >= freqMs) {
+            const minsLeft = Math.round(timeToStart / 60000);
+            const notifId = `bomb-${evt.id}-${nowTime}`;
+            
+            const newNotif = {
+              id: notifId,
+              type: 'warning' as const,
+              message: `🚨 Guardian Alert: "${evt.title}" starts in ${minsLeft} minutes! Get ready.`,
+              timestamp: now.toISOString(),
+              read: false,
+              eventId: evt.id
+            };
+            saveUserNotification(user.uid, notifId, newNotif).catch(e => console.error(e));
+            
+            // Play alarm sound
+            try {
+              const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const osc = ctx.createOscillator();
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(440, ctx.currentTime);
+              osc.connect(ctx.destination);
+              osc.start();
+              osc.stop(ctx.currentTime + 0.1);
+            } catch (err) {}
+            
+            evt.lastBombTime = now.toISOString();
+            changedEvents = true;
+            saveUserEvent(user.uid, evt.id, { lastBombTime: evt.lastBombTime }).catch(e => console.error(e));
+          }
+        }
+        
+        // 2. Post-session Check-in Prompt (after focus session end time)
+        if (evt.isFocusSession && nowTime >= endTime && !evt.checkedIn) {
+          const postNotifId = `postcheck-${evt.id}`;
+          const hasPostNotif = notifications.some(n => n.id === postNotifId);
+          if (!hasPostNotif) {
+            const newNotif = {
+              id: postNotifId,
+              type: 'info' as const,
+              message: `⏱️ Focus session "${evt.title}" has ended. Please log your progress.`,
+              timestamp: now.toISOString(),
+              read: false,
+              eventId: evt.id,
+              isPostSessionPrompt: true
+            };
+            saveUserNotification(user.uid, postNotifId, newNotif).catch(e => console.error(e));
+            // Trigger Check-in modal
+            setCheckInTask({ id: evt.taskId!, title: evt.title, eventId: evt.id });
+          }
+        }
+        
+        return evt;
+      });
+      
+      if (changedEvents) {
+        setEvents(updatedEvents);
+      }
+    }, 10000);
+    
+    return () => clearInterval(checkInterval);
+  }, [user, events, bombFrequency, notifications]);
 
   const handleToggleCalendar = async () => {
     if (!user) return;
@@ -390,8 +583,27 @@ export default function App() {
       console.error(e);
     }
   };
-  const handleTriggerCheckIn = (taskId: string, sessionTitle: string) => {
-    setCheckInTask({ id: taskId, title: sessionTitle });
+  const handleTriggerCheckIn = (taskId: string, sessionTitle: string, eventId?: string) => {
+    setCheckInTask({ id: taskId, title: sessionTitle, eventId });
+  };
+
+  const handleAcknowledgeEvent = async (eventId: string, notificationId: string) => {
+    if (!user) return;
+    try {
+      const updatedEvents = events.map(ev => {
+        if (ev.id === eventId) {
+          const uEvt = { ...ev, acknowledged: true };
+          saveUserEvent(user.uid, ev.id, { acknowledged: true }).catch(e => console.error(e));
+          return uEvt;
+        }
+        return ev;
+      });
+      setEvents(updatedEvents);
+      await deleteUserNotification(user.uid, notificationId);
+      refreshAllData();
+    } catch (e) {
+      console.error("Failed to acknowledge event:", e);
+    }
   };
 
   // Helper to format deadline days remaining
@@ -444,6 +656,26 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Bomb Pacing Selector */}
+            <div className="flex items-center gap-2 bg-[#111114] border border-[#262626] rounded-xl px-3 py-1.5 text-xs text-zinc-400">
+              <span className="text-[10px] font-mono uppercase tracking-wider">Bomb Frequency:</span>
+              <select
+                value={bombFrequency}
+                onChange={async (e) => {
+                  const val = Number(e.target.value);
+                  setBombFrequency(val);
+                  if (user) {
+                    await saveUserMetadata(user.uid, { bombFrequency: val });
+                  }
+                }}
+                className="bg-transparent border-none text-red-500 focus:outline-none cursor-pointer font-bold select-none text-[11px]"
+              >
+                <option value={1} className="bg-[#111114] text-white">1 min</option>
+                <option value={5} className="bg-[#111114] text-white">5 min</option>
+                <option value={10} className="bg-[#111114] text-white">10 min</option>
+              </select>
+            </div>
+
             {/* Notification Tray */}
             <div className="relative group">
               <button className="p-2.5 bg-[#111114] hover:bg-[#1c1c21] border border-[#262626] rounded-xl text-zinc-400 hover:text-white transition duration-150 cursor-pointer relative">
@@ -468,7 +700,7 @@ export default function App() {
                 <div className="space-y-2 max-h-[220px] overflow-y-auto scrollbar-none">
                   {notifications.length > 0 ? (
                     notifications.map(n => (
-                      <div key={n.id} className={`p-2.5 rounded-xl border text-[11px] ${
+                      <div key={n.id} className={`p-2.5 rounded-xl border text-[11px] space-y-2 ${
                         n.type === 'rescue' 
                           ? 'bg-red-950/20 border-red-900/40 text-red-300' 
                           : n.type === 'warning'
@@ -476,9 +708,47 @@ export default function App() {
                           : 'bg-zinc-900 border-[#262626] text-zinc-300'
                       }`}>
                         <p className="font-semibold leading-relaxed">{n.message}</p>
-                        <span className="text-[9px] text-zinc-500 font-mono block mt-1">
-                          {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <span className="text-[9px] text-zinc-500 font-mono">
+                            {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          
+                          {n.eventId && (
+                            <div className="flex gap-1.5">
+                              {n.isTaskCompletionPrompt ? (
+                                <button
+                                  onClick={async () => {
+                                    await handleMarkComplete(n.eventId!);
+                                    await deleteUserNotification(user!.uid, n.id);
+                                    refreshAllData();
+                                  }}
+                                  className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
+                                >
+                                  Mark Complete
+                                </button>
+                              ) : n.isPostSessionPrompt ? (
+                                <button
+                                  onClick={() => {
+                                    const evt = events.find(e => e.id === n.eventId);
+                                    if (evt && evt.taskId) {
+                                      handleTriggerCheckIn(evt.taskId, evt.title, evt.id);
+                                    }
+                                  }}
+                                  className="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
+                                >
+                                  Check-in
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => handleAcknowledgeEvent(n.eventId!, n.id)}
+                                  className="px-2 py-0.5 bg-amber-600 hover:bg-amber-500 text-white rounded text-[9px] font-bold uppercase cursor-pointer"
+                                >
+                                  Got It
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     ))
                   ) : (
@@ -753,6 +1023,7 @@ export default function App() {
           {/* Calendar visualizer */}
           <CalendarView
             events={events}
+            tasks={tasks}
             isConnected={calendarConnected}
             onToggleConnect={handleToggleCalendar}
             onTriggerCheckin={handleTriggerCheckIn}
@@ -781,12 +1052,39 @@ export default function App() {
             isOpen={!!checkInTask}
             taskId={checkInTask.id}
             sessionTitle={checkInTask.title}
+            eventId={checkInTask.eventId}
             onClose={() => setCheckInTask(null)}
             tasks={tasks}
             rescueMode={rescueMode}
-            onCheckInCompleted={() => {
+            onCheckInCompleted={async () => {
+              const taskId = checkInTask.id;
+              const eventId = checkInTask.eventId;
               setCheckInTask(null);
               refreshAllData();
+
+              const matchedTask = tasks.find(t => t.id === taskId);
+              if (matchedTask && matchedTask.status !== 'completed') {
+                const taskFocusEvents = events.filter(e => e.taskId === taskId && e.isFocusSession);
+                const otherEvents = taskFocusEvents.filter(e => e.id !== eventId);
+                const allOthersCheckedIn = otherEvents.every(e => e.checkedIn);
+                
+                if (allOthersCheckedIn) {
+                  const notifId = `completeprompt-${taskId}`;
+                  const newNotif = {
+                    id: notifId,
+                    type: 'success' as const,
+                    message: `🎉 Focus roadmap complete for "${matchedTask.title}"! Mark task as completed?`,
+                    timestamp: new Date().toISOString(),
+                    read: false,
+                    eventId: taskId,
+                    isTaskCompletionPrompt: true
+                  };
+                  if (user) {
+                    await saveUserNotification(user.uid, notifId, newNotif);
+                    refreshAllData();
+                  }
+                }
+              }
             }}
           />
         )}

@@ -6,18 +6,19 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Calendar, Check, ExternalLink, ShieldCheck, Link2, AlertCircle, Bot } from 'lucide-react';
-import { CalendarEvent } from '../types';
+import { CalendarEvent, Task } from '../types';
 
 interface CalendarViewProps {
   events: CalendarEvent[];
+  tasks: Task[];
   isConnected: boolean;
   onToggleConnect: () => void;
-  onTriggerCheckin: (taskId: string, sessionTitle: string) => void;
+  onTriggerCheckin: (taskId: string, sessionTitle: string, eventId?: string) => void;
   error?: { message: string; details?: string; apiDisabled?: boolean } | null;
   onClearError?: () => void;
 }
 
-export default function CalendarView({ events, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError }: CalendarViewProps) {
+export default function CalendarView({ events, tasks, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError }: CalendarViewProps) {
   // Sort events chronologically
   const sortedEvents = [...events].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
@@ -31,6 +32,12 @@ export default function CalendarView({ events, isConnected, onToggleConnect, onT
     const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
     const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return { day, time };
+  };
+
+  const parseEventTitle = (title: string, checkedIn: boolean | undefined) => {
+    const cleanTitle = title.replace(/^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])\s*/i, '');
+    const isCompleted = !!checkedIn || /^([✓✔☑✅]|\u2713|\u2714|✔️|\[Done\]|\[Completed\])/i.test(title);
+    return { cleanTitle, isCompleted };
   };
 
   return (
@@ -142,20 +149,34 @@ export default function CalendarView({ events, isConnected, onToggleConnect, onT
                             {day} · {time} - {end.time}
                           </span>
                         </div>
-                        <h4 className={`text-xs font-semibold ${evt.isFocusSession ? 'text-red-200' : 'text-zinc-300'}`}>
-                          {evt.title}
-                        </h4>
+                        {(() => {
+                          const { cleanTitle, isCompleted } = parseEventTitle(evt.title, evt.checkedIn);
+                          return (
+                            <h4 className={`text-xs font-semibold flex items-center gap-1.5 ${
+                              evt.isFocusSession ? 'text-red-200' : 'text-zinc-300'
+                            } ${isCompleted ? 'line-through text-zinc-500 opacity-60' : ''}`}>
+                              {isCompleted && <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />}
+                              <span>{cleanTitle}</span>
+                            </h4>
+                          );
+                        })()}
                       </div>
 
-                      {evt.isFocusSession && evt.taskId && (
-                        <button
-                          onClick={() => onTriggerCheckin(evt.taskId!, evt.title)}
-                          className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-bold tracking-wide uppercase cursor-pointer transition duration-150 shadow-[0_0_12px_rgba(220,38,38,0.3)]"
-                        >
-                          <Check className="w-3 h-3" />
-                          CHECK-IN
-                        </button>
-                      )}
+                      {evt.isFocusSession && evt.taskId && (() => {
+                        const { isCompleted } = parseEventTitle(evt.title, evt.checkedIn);
+                        if (isCompleted) return null;
+                        const task = tasks.find(t => t.id === evt.taskId);
+                        if (task && task.status === 'completed') return null;
+                        return (
+                          <button
+                            onClick={() => onTriggerCheckin(evt.taskId!, evt.title, evt.id)}
+                            className="shrink-0 flex items-center gap-1 px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-bold tracking-wide uppercase cursor-pointer transition duration-150 shadow-[0_0_12px_rgba(220,38,38,0.3)]"
+                          >
+                            <Check className="w-3 h-3" />
+                            CHECK-IN
+                          </button>
+                        );
+                      })()}
                     </div>
                   </motion.div>
                 );

@@ -7,7 +7,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bot, Check, AlertTriangle, Sparkles, X, Send, Mic, MicOff } from 'lucide-react';
 import { checkInSession } from '../api';
-import { auth, saveUserTask, saveUserLog, saveUserNotification, saveUserMetadata } from '../firebase';
+import { auth, saveUserTask, saveUserLog, saveUserNotification, saveUserMetadata, saveUserEvent } from '../firebase';
 import { Task } from '../types';
 
 interface CheckInModalProps {
@@ -18,6 +18,7 @@ interface CheckInModalProps {
   onCheckInCompleted: () => void;
   tasks?: Task[];
   rescueMode?: boolean;
+  eventId?: string;
 }
 
 export default function CheckInModal({ 
@@ -27,7 +28,8 @@ export default function CheckInModal({
   sessionTitle, 
   onCheckInCompleted,
   tasks,
-  rescueMode
+  rescueMode,
+  eventId
 }: CheckInModalProps) {
   const [status, setStatus] = useState<'completed' | 'partially_completed' | 'failed' | null>(null);
   const [textFeedback, setTextFeedback] = useState('');
@@ -63,6 +65,10 @@ export default function CheckInModal({
 
         if (response.newNotification) {
           await saveUserNotification(currentUser.uid, response.newNotification.id, response.newNotification);
+        }
+
+        if (eventId) {
+          await saveUserEvent(currentUser.uid, eventId, { checkedIn: true, checkInStatus: status });
         }
 
         await saveUserMetadata(currentUser.uid, { rescueMode: response.rescueMode });

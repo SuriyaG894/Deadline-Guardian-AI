@@ -4,7 +4,7 @@
     "name": "Suriya Ganesh",
     "isLoggedIn": true,
     "calendarConnected": true,
-    "googleAccessToken": "ya29.a0AT3oNZ_JOTDinu3m0JeDgttVd8XXEYwDl1v4FeNKwGZhRsIw_1RcyMIHOY6jlkTOov1y7nXXctP_vUfd7dQjlTKvWK5tNdYMMeIFoEimWjnAdcC6XqaofVKksdwoUXN8j4Ve8KZ3PIfSsKE1ePViIOCLxLHAsu_0bUKS9xOHmh80RyQ9ax1hIT-Nsem-SNhgqsKL8Q0hkKp5PAwsZZnbuFhQwYQGzS8rI0golfFK6QaRt3X_eXBUrLDUGQCJbTvhNqjiphWSgyLe1Gx8e_d4o5fve0HqBgaCgYKATYSARMSFQHGX2MiE2z-hNNuo3xx6t5drVUgug0293"
+    "googleAccessToken": "ya29.a0AT3oNZ8DcXCJUp591EOxEejZtNWEfRgYhshoGmRCfq5hnMV8LEG9pZWdjg5STQhGNJJ4PoAZXE-62sLYCg6V9QEkxqEO-byZGbbcixaOdAlVEsk-v77WWbhctlbaV8IjhvKeFQiAJh59ezaNor9NUoz3T6jvrgQTm7FjfyHKvfzJfYeAUfYVI-CGMhyv_SoncTcg3xkCrNQ59EmyBG-C0JuvoXt6EDIrvaWZM1U4s_a-9fuZs-u7xFLfobRwR3GqNUJ4WtOTG4EQKPgImtdfpP_H8jiXFgaCgYKAXsSARMSFQHGX2Mi8ABtil5SwPR-rfVyyEDz3Q0293"
   },
   "tasks": [
     {
@@ -68,22 +68,7 @@
       "createdAt": "2026-06-25T06:07:20.778Z"
     }
   ],
-  "calendarEvents": [
-    {
-      "id": "0dgs9vfcinlslnidlfvh62s75r",
-      "title": "Go to Gym",
-      "start": "2026-06-26T11:30:00+05:30",
-      "end": "2026-06-26T13:00:00+05:30",
-      "isFocusSession": false
-    },
-    {
-      "id": "798ee43eetiuskqub0215eocuh",
-      "title": "Prepare Presentation for AQI",
-      "start": "2026-06-26T14:30:00+05:30",
-      "end": "2026-06-26T15:30:00+05:30",
-      "isFocusSession": false
-    }
-  ],
+  "calendarEvents": [],
   "executionPlans": [
     {
       "id": "plan-1782457401903",
