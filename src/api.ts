@@ -57,11 +57,11 @@ export async function toggleCalendarConnection(accessToken?: string): Promise<{ 
   return res.json();
 }
 
-export async function generateExecutionPlan(taskId: string, tasks?: Task[], calendarEvents?: CalendarEvent[]): Promise<ExecutionPlan> {
+export async function generateExecutionPlan(taskId: string, tasks?: Task[], calendarEvents?: CalendarEvent[], localTime?: string): Promise<ExecutionPlan> {
   const res = await fetch('/api/ai/plan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ taskId, tasks, calendarEvents })
+    body: JSON.stringify({ taskId, tasks, calendarEvents, localTime })
   });
   return res.json();
 }
