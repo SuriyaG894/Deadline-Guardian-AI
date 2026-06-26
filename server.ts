@@ -590,9 +590,46 @@ function computeSessionStartAndEnd(
   };
 }
 
+// Helper to fetch completed tasks from Google Tasks API
+async function fetchCompletedGoogleTasks(accessToken: string): Promise<Set<string>> {
+  const completedTaskIds = new Set<string>();
+  try {
+    const listsResponse = await fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!listsResponse.ok) {
+      console.warn("Failed to fetch Google Task lists:", listsResponse.status);
+      return completedTaskIds;
+    }
+    const listsData: any = await listsResponse.json();
+    if (listsData && listsData.items) {
+      for (const list of listsData.items) {
+        const tasksResponse = await fetch(`https://tasks.googleapis.com/tasks/v1/lists/${list.id}/tasks?showCompleted=true&showHidden=true&maxResults=100`, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        if (tasksResponse.ok) {
+          const tasksData: any = await tasksResponse.json();
+          if (tasksData && tasksData.items) {
+            for (const task of tasksData.items) {
+              if (task.status === 'completed') {
+                completedTaskIds.add(task.id);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error fetching Google Tasks:", err);
+  }
+  return completedTaskIds;
+}
+
 // Helper to fetch actual events from Google Calendar API
 async function fetchGoogleCalendarEvents(accessToken: string) {
   try {
+    const completedTasksPromise = fetchCompletedGoogleTasks(accessToken);
+
     const response = await fetch(
       'https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=' + new Date().toISOString() + '&maxResults=15&singleEvents=true&orderBy=startTime',
       {
@@ -620,16 +657,38 @@ async function fetchGoogleCalendarEvents(accessToken: string) {
         apiDisabled: isApiDisabled
       };
     }
+
+    const completedTasks = await completedTasksPromise;
     const data: any = await response.json();
     const events: any[] = [];
     if (data && data.items) {
       for (const item of data.items) {
+        let title = item.summary || 'No Title';
+        let checkedIn = false;
+        let checkInStatus: string | undefined = undefined;
+
+        if (item.description) {
+          const match = item.description.match(/tasks\.google\.com\/task\/([A-Za-z0-9_-]+)/);
+          if (match && match[1]) {
+            const taskId = match[1];
+            if (completedTasks.has(taskId)) {
+              checkedIn = true;
+              checkInStatus = 'completed';
+              if (!title.startsWith('✓')) {
+                title = '✓ ' + title;
+              }
+            }
+          }
+        }
+
         events.push({
           id: item.id,
-          title: item.summary || 'No Title',
+          title: title,
           start: item.start?.dateTime || item.start?.date || new Date().toISOString(),
           end: item.end?.dateTime || item.end?.date || new Date().toISOString(),
           isFocusSession: false,
+          checkedIn,
+          checkInStatus,
         });
       }
     }
@@ -750,7 +809,7 @@ app.post('/api/ai/plan', async (req, res) => {
 Task Title: "${task.title}"
 Total Hours Needed: ${task.estimatedHours}
 Task Description: "${task.description || 'None'}"
-Deadline: ${task.deadline}
+Deadline: ${task.deadline} (User's local date/time reference)
 User's Current Local Date/Time: ${localTime || new Date().toString()}
 
 Here are the user's current calendar commitments to avoid scheduling conflicts:
@@ -759,9 +818,11 @@ ${existingCalendarTitles || 'No conflict events.'}
 Suggest a set of 2 to 4 focus sessions to complete this task on time.
 
 CRITICAL CONSTRAINTS:
-1. All focus sessions must be scheduled strictly in the FUTURE relative to the User's Current Local Date/Time.
-2. If scheduling a focus session for "Today", the session's start time MUST be after the user's current local time. Do NOT schedule focus sessions in the past.
-3. Keep the timezone offset in mind. Ensure that if "Today" is Friday, and the current local time is 12:30 PM, any session for "Today" must start at 1:00 PM or later.
+1. **Future-Only**: All focus sessions must be scheduled strictly in the FUTURE relative to the User's Current Local Date/Time.
+2. **No Past Scheduling for Today**: If scheduling a focus session for "Today", the session's start time MUST be after the user's current local time. Do NOT schedule focus sessions in the past.
+3. **Respect GMT/Timezone Offset**: Keep the timezone offset in mind. Ensure that if "Today" is Friday, and the current local time is 12:30 PM, any session for "Today" must start at 1:00 PM or later.
+4. **Prioritize Today**: If there is open, conflict-free time remaining "Today" (after the user's current local time and not overlapping with their calendar commitments), you MUST schedule focus sessions today (e.g. in the afternoon or evening: 4 PM–6 PM, 6 PM–8 PM, 7 PM–9 PM, etc.). Do not defer work to "Tomorrow" if it can be scheduled in the remaining free time today, especially if the deadline is today or tomorrow.
+5. **Respect the Deadline**: Ensure all scheduled focus sessions are on or before the task's deadline date. If the deadline is Today, all focus sessions must be scheduled for "Today" (after the current local time).
 
 Return a JSON array of focus sessions exactly matching this schema:
 [

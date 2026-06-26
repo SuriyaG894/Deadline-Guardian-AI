@@ -46,6 +46,7 @@ function setLocalItem(uid: string, key: string, value: any) {
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/calendar');
 provider.addScope('https://www.googleapis.com/auth/calendar.events');
+provider.addScope('https://www.googleapis.com/auth/tasks.readonly');
 
 export const signInWithGoogleCalendar = async (): Promise<string | null> => {
   try {
@@ -109,6 +110,7 @@ export interface UserMetadata {
   calendarConnected: boolean;
   rescueMode: boolean;
   googleAccessToken?: string | null;
+  bombFrequency?: number;
 }
 
 // 1. User Profile Document Schema

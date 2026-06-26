@@ -26,6 +26,10 @@ export interface CalendarEvent {
   end: string;   // ISO string YYYY-MM-DDTHH:mm
   isFocusSession: boolean;
   taskId?: string;
+  checkedIn?: boolean;
+  checkInStatus?: 'completed' | 'partially_completed' | 'failed';
+  acknowledged?: boolean;
+  lastBombTime?: string;
 }
 
 export interface ExecutionPlanItem {
@@ -62,6 +66,9 @@ export interface SystemNotification {
   message: string;
   timestamp: string;
   read: boolean;
+  eventId?: string;
+  isPostSessionPrompt?: boolean;
+  isTaskCompletionPrompt?: boolean;
 }
 
 export interface Analytics {
