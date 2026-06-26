@@ -43,12 +43,12 @@ export async function deleteTask(id: string): Promise<{ success: boolean }> {
   return res.json();
 }
 
-export async function fetchCalendarEvents(): Promise<{ connected: boolean; events: CalendarEvent[] }> {
+export async function fetchCalendarEvents(): Promise<{ connected: boolean; events?: CalendarEvent[]; error?: string; apiDisabled?: boolean; details?: string }> {
   const res = await fetch('/api/calendar/events');
   return res.json();
 }
 
-export async function toggleCalendarConnection(accessToken?: string): Promise<{ connected: boolean; events: CalendarEvent[] }> {
+export async function toggleCalendarConnection(accessToken?: string): Promise<{ connected: boolean; events?: CalendarEvent[]; error?: string; apiDisabled?: boolean; details?: string }> {
   const res = await fetch('/api/calendar/connect', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

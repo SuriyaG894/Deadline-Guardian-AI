@@ -13,9 +13,11 @@ interface CalendarViewProps {
   isConnected: boolean;
   onToggleConnect: () => void;
   onTriggerCheckin: (taskId: string, sessionTitle: string) => void;
+  error?: { message: string; details?: string; apiDisabled?: boolean } | null;
+  onClearError?: () => void;
 }
 
-export default function CalendarView({ events, isConnected, onToggleConnect, onTriggerCheckin }: CalendarViewProps) {
+export default function CalendarView({ events, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError }: CalendarViewProps) {
   // Sort events chronologically
   const sortedEvents = [...events].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
@@ -57,6 +59,44 @@ export default function CalendarView({ events, isConnected, onToggleConnect, onT
           )}
         </button>
       </div>
+
+      {/* Error Alert Box */}
+      {error && (
+        <div className="bg-red-950/20 border border-red-900/50 rounded-2xl p-4 mb-4 text-xs space-y-2 relative" id="calendar-error-banner">
+          <div className="flex items-start gap-2 text-red-400 font-semibold">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <p>{error.message}</p>
+              {error.apiDisabled && (
+                <p className="mt-1.5 text-zinc-300 font-normal leading-relaxed">
+                  Google Calendar API is not enabled in your Google Cloud Project. Please visit the Cloud Console to enable it, then try connecting again:
+                </p>
+              )}
+            </div>
+          </div>
+          {error.apiDisabled && (
+            <div className="pt-1">
+              <a
+                href="https://console.developers.google.com/apis/api/calendar-json.googleapis.com/overview"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-red-400 hover:text-red-300 font-mono font-bold underline cursor-pointer bg-red-950/40 px-2 py-1 rounded"
+              >
+                Enable Calendar API
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
+          {onClearError && (
+            <button
+              onClick={onClearError}
+              className="absolute top-2 right-2 text-zinc-500 hover:text-zinc-300 text-sm font-bold cursor-pointer px-1"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-[220px] scrollbar-none">
