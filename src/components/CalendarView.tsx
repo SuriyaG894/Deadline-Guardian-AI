@@ -21,9 +21,13 @@ export default function CalendarView({ events, isConnected, onToggleConnect, onT
   // Sort events chronologically
   const sortedEvents = [...events].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
-  // Helper to format dates nicely
   const formatDateTime = (isoStr: string) => {
-    const d = new Date(isoStr);
+    let normalized = isoStr;
+    // Check if it has a time part (T) but lacks a timezone indicator (Z or +/- offset at the end)
+    if (isoStr.includes('T') && !isoStr.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(isoStr)) {
+      normalized = isoStr + 'Z';
+    }
+    const d = new Date(normalized);
     const day = d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
     const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     return { day, time };

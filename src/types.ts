@@ -43,6 +43,7 @@ export interface ExecutionPlan {
   items: ExecutionPlanItem[];
   approved: boolean;
   createdAt: string;
+  referenceTime?: string;
 }
 
 export interface ProgressLog {

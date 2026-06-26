@@ -82,39 +82,45 @@
       "start": "2026-06-26T14:30:00+05:30",
       "end": "2026-06-26T15:30:00+05:30",
       "isFocusSession": false
-    },
-    {
-      "id": "cal-focus-1",
-      "title": "🎯 Focus: Backend Dev",
-      "start": "2026-06-25T10:00",
-      "end": "2026-06-25T12:00",
-      "isFocusSession": true,
-      "taskId": "task-1"
     }
   ],
   "executionPlans": [
     {
-      "id": "plan-1",
+      "id": "plan-1782457401903",
       "taskId": "task-1",
       "taskTitle": "Backend Development & Authentication",
-      "approved": true,
-      "createdAt": "2026-06-25T06:00:19.679Z",
       "items": [
         {
-          "id": "epi-1",
+          "id": "epi-1782457401902-0",
           "day": "Today",
-          "timeSlot": "6 PM–8 PM",
-          "phase": "API Setup",
-          "duration": 2
+          "timeSlot": "8 AM–11 AM",
+          "phase": "Backend API Architecture and Express Setup",
+          "duration": 3
         },
         {
-          "id": "epi-2",
+          "id": "epi-1782457401903-1",
+          "day": "Today",
+          "timeSlot": "4 PM–8 PM",
+          "phase": "Database Schema Design and Persistence Setup",
+          "duration": 4
+        },
+        {
+          "id": "epi-1782457401903-2",
           "day": "Tomorrow",
-          "timeSlot": "7 PM–9 PM",
-          "phase": "Schema Integration",
-          "duration": 2
+          "timeSlot": "9 AM–1 PM",
+          "phase": "Authentication Logic and Middleware Integration",
+          "duration": 4
+        },
+        {
+          "id": "epi-1782457401903-3",
+          "day": "Tomorrow",
+          "timeSlot": "2 PM–9 PM",
+          "phase": "API Implementation and Final Testing",
+          "duration": 7
         }
-      ]
+      ],
+      "approved": false,
+      "createdAt": "2026-06-26T07:03:21.903Z"
     }
   ],
   "progressLogs": [

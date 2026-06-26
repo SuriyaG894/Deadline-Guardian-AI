@@ -87,22 +87,22 @@ function initializeDataStore() {
         {
           id: "cal-1",
           title: "Team Sync Meeting",
-          start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
-          end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().substring(0, 16),
+          start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+          end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
           isFocusSession: false
         },
         {
           id: "cal-2",
           title: "System Design Mock Interview",
-          start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
-          end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString().substring(0, 16),
+          start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
+          end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString(),
           isFocusSession: false
         },
         {
           id: "cal-focus-1",
           title: "🎯 Focus: Backend Dev",
-          start: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().substring(0, 16),
-          end: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString().substring(0, 16),
+          start: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+          end: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
           isFocusSession: true,
           taskId: "task-1"
         }
@@ -453,6 +453,143 @@ app.delete('/api/tasks/:id', (req, res) => {
   res.json({ success: true });
 });
 
+function parseTimeSlotToHours(timeSlotStr: string): { startHour: number; startMinute: number } {
+  const clean = timeSlotStr.toUpperCase().replace(/\s/g, '');
+  const firstPart = clean.split(/[–-]/)[0];
+  
+  const isPM = firstPart.includes('PM');
+  const isAM = firstPart.includes('AM');
+  
+  const timeNum = firstPart.replace(/[A-Z]/g, '');
+  const parts = timeNum.split(':');
+  let hour = parseInt(parts[0], 10);
+  let minute = parts[1] ? parseInt(parts[1], 10) : 0;
+  
+  if (isNaN(hour)) {
+    return { startHour: 18, startMinute: 0 };
+  }
+  
+  if (isPM && hour < 12) {
+    hour += 12;
+  } else if (isAM && hour === 12) {
+    hour = 0;
+  }
+  
+  return { startHour: hour, startMinute: minute };
+}
+
+function formatGmtOffset(offsetStr: string): string {
+  if (!offsetStr || offsetStr === 'GMT' || offsetStr === 'UTC') return 'Z';
+  let clean = offsetStr.replace('GMT', '');
+  if (clean.includes(':')) {
+    return clean;
+  }
+  if (clean.length === 5) {
+    return clean.substring(0, 3) + ':' + clean.substring(3, 5);
+  }
+  return 'Z';
+}
+
+function calculateDayOffset(targetDay: string, referenceDayAbbr: string): number {
+  const targetLower = targetDay.toLowerCase();
+  if (targetLower === 'today') return 0;
+  if (targetLower === 'tomorrow') return 1;
+  
+  const weekdays = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const refIndex = weekdays.indexOf(referenceDayAbbr.toLowerCase());
+  
+  let targetIndex = -1;
+  for (let i = 0; i < weekdays.length; i++) {
+    if (targetLower.includes(weekdays[i])) {
+      targetIndex = i;
+      break;
+    }
+  }
+  
+  if (refIndex === -1 || targetIndex === -1) {
+    return 0;
+  }
+  
+  let offset = targetIndex - refIndex;
+  if (offset < 0) {
+    offset += 7;
+  }
+  return offset;
+}
+
+function computeSessionStartAndEnd(
+  day: string,
+  timeSlot: string,
+  duration: number,
+  referenceTime: string | undefined,
+  createdAt: string
+): { start: string, end: string } {
+  const refTimeStr = referenceTime || createdAt || new Date().toString();
+  
+  let parsed: any = null;
+  try {
+    const parts = refTimeStr.split(' ');
+    if (parts.length >= 5) {
+      const timeParts = parts[4].split(':');
+      parsed = {
+        dayNameAbbr: parts[0],
+        monthAbbr: parts[1],
+        dayOfMonth: parseInt(parts[2], 10),
+        year: parseInt(parts[3], 10),
+        hours: parseInt(timeParts[0], 10),
+        minutes: parseInt(timeParts[1], 10),
+        gmtOffsetStr: parts[5]
+      };
+    }
+  } catch (e) {
+    console.error("Failed to parse referenceTime:", refTimeStr, e);
+  }
+
+  if (!parsed) {
+    let dayOffset = 0;
+    const targetLower = day.toLowerCase();
+    if (targetLower === 'tomorrow') dayOffset = 1;
+    else if (targetLower.includes('sat')) dayOffset = 2;
+    else if (targetLower.includes('sun')) dayOffset = 3;
+    else if (targetLower.includes('mon')) dayOffset = 4;
+
+    const baseDate = new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000);
+    const { startHour, startMinute } = parseTimeSlotToHours(timeSlot);
+
+    const start = new Date(baseDate.setHours(startHour, startMinute, 0, 0)).toISOString();
+    const end = new Date(baseDate.setHours(startHour + duration, startMinute, 0, 0)).toISOString();
+    return { start, end };
+  }
+
+  const dayOffset = calculateDayOffset(day, parsed.dayNameAbbr);
+
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthIndex = months.indexOf(parsed.monthAbbr);
+  
+  const tempDate = new Date(parsed.year, monthIndex >= 0 ? monthIndex : 0, parsed.dayOfMonth);
+  tempDate.setDate(tempDate.getDate() + dayOffset);
+
+  const targetYear = tempDate.getFullYear();
+  const targetMonth = String(tempDate.getMonth() + 1).padStart(2, '0');
+  const targetDayOfMonth = String(tempDate.getDate()).padStart(2, '0');
+
+  const { startHour, startMinute } = parseTimeSlotToHours(timeSlot);
+
+  const startHourStr = String(startHour).padStart(2, '0');
+  const startMinStr = String(startMinute).padStart(2, '0');
+
+  const formattedOffset = formatGmtOffset(parsed.gmtOffsetStr);
+
+  const startLocalStr = `${targetYear}-${targetMonth}-${targetDayOfMonth}T${startHourStr}:${startMinStr}:00${formattedOffset}`;
+  const startDate = new Date(startLocalStr);
+  const endDate = new Date(startDate.getTime() + duration * 60 * 60 * 1000);
+
+  return {
+    start: startDate.toISOString(),
+    end: endDate.toISOString()
+  };
+}
+
 // Helper to fetch actual events from Google Calendar API
 async function fetchGoogleCalendarEvents(accessToken: string) {
   try {
@@ -574,16 +711,32 @@ app.post('/api/calendar/connect', async (req, res) => {
 
 // Generate execution plan based on task + calendar events
 app.post('/api/ai/plan', async (req, res) => {
-  const { taskId, tasks, calendarEvents } = req.body;
+  const { taskId, tasks, calendarEvents, localTime } = req.body;
   const isStateless = Array.isArray(tasks);
   const store = isStateless ? null : getData();
   const currentTasks = isStateless ? tasks : store.tasks;
-  const currentEvents = isStateless ? calendarEvents : store.calendarEvents;
+  const currentEvents = (isStateless ? calendarEvents : store.calendarEvents).filter((e: any) => e.taskId !== taskId);
 
   const task = currentTasks.find((t: Task) => t.id === taskId);
 
   if (!task) {
     return res.status(404).json({ error: "Task not found" });
+  }
+
+  let localHour = new Date().getHours();
+  let referenceDayAbbr = new Date().toLocaleDateString('en-US', { weekday: 'short' });
+
+  if (localTime) {
+    try {
+      const parts = localTime.split(' ');
+      if (parts.length >= 5) {
+        const timeParts = parts[4].split(':');
+        localHour = parseInt(timeParts[0], 10);
+        referenceDayAbbr = parts[0];
+      }
+    } catch (e) {
+      console.error("Failed to parse localTime:", e);
+    }
   }
 
   const aiClient = getGeminiClient();
@@ -598,12 +751,18 @@ Task Title: "${task.title}"
 Total Hours Needed: ${task.estimatedHours}
 Task Description: "${task.description || 'None'}"
 Deadline: ${task.deadline}
-Current Date/Time: ${new Date().toISOString()}
+User's Current Local Date/Time: ${localTime || new Date().toString()}
 
 Here are the user's current calendar commitments to avoid scheduling conflicts:
 ${existingCalendarTitles || 'No conflict events.'}
 
 Suggest a set of 2 to 4 focus sessions to complete this task on time.
+
+CRITICAL CONSTRAINTS:
+1. All focus sessions must be scheduled strictly in the FUTURE relative to the User's Current Local Date/Time.
+2. If scheduling a focus session for "Today", the session's start time MUST be after the user's current local time. Do NOT schedule focus sessions in the past.
+3. Keep the timezone offset in mind. Ensure that if "Today" is Friday, and the current local time is 12:30 PM, any session for "Today" must start at 1:00 PM or later.
+
 Return a JSON array of focus sessions exactly matching this schema:
 [
   {
@@ -644,15 +803,48 @@ Return a JSON array of focus sessions exactly matching this schema:
 
   if (!planItems || planItems.length === 0) {
     // Local fallback planning
-    const days = ["Today", "Tomorrow", "Saturday", "Sunday"];
+    const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const refIndex = weekdays.findIndex(w => w.toLowerCase().startsWith(referenceDayAbbr.toLowerCase()));
+    
+    const getDayName = (offsetDays: number) => {
+      if (offsetDays === 0) return 'Today';
+      if (offsetDays === 1) return 'Tomorrow';
+      const targetIndex = (refIndex + offsetDays) % 7;
+      return weekdays[targetIndex];
+    };
+
+    const formatTimeSlot = (startHour24: number, duration: number): string => {
+      const getAmPm = (h: number) => {
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        let displayHour = h % 12;
+        if (displayHour === 0) displayHour = 12;
+        return `${displayHour} ${ampm}`;
+      };
+      return `${getAmPm(startHour24)}–${getAmPm(startHour24 + duration)}`;
+    };
+
     const phases = ["Environment & Core Setup", "Feature Implementation", "Testing & Deployment"];
     const hoursPerSession = Math.round(task.estimatedHours / 3) || 2;
 
-    planItems = [
-      { id: "epi-1", day: "Today", timeSlot: "6 PM–8 PM", phase: phases[0], duration: hoursPerSession },
-      { id: "epi-2", day: "Tomorrow", timeSlot: "7 PM–9 PM", phase: phases[1], duration: hoursPerSession },
-      { id: "epi-3", day: "Saturday", timeSlot: "2 PM–5 PM", phase: phases[2], duration: hoursPerSession }
-    ];
+    if (localHour < 14) {
+      planItems = [
+        { id: "epi-1", day: getDayName(0), timeSlot: formatTimeSlot(14, hoursPerSession), phase: phases[0], duration: hoursPerSession },
+        { id: "epi-2", day: getDayName(1), timeSlot: formatTimeSlot(10, hoursPerSession), phase: phases[1], duration: hoursPerSession },
+        { id: "epi-3", day: getDayName(2), timeSlot: formatTimeSlot(14, hoursPerSession), phase: phases[2], duration: hoursPerSession }
+      ];
+    } else if (localHour < 18) {
+      planItems = [
+        { id: "epi-1", day: getDayName(0), timeSlot: formatTimeSlot(18, hoursPerSession), phase: phases[0], duration: hoursPerSession },
+        { id: "epi-2", day: getDayName(1), timeSlot: formatTimeSlot(10, hoursPerSession), phase: phases[1], duration: hoursPerSession },
+        { id: "epi-3", day: getDayName(2), timeSlot: formatTimeSlot(14, hoursPerSession), phase: phases[2], duration: hoursPerSession }
+      ];
+    } else {
+      planItems = [
+        { id: "epi-1", day: getDayName(1), timeSlot: formatTimeSlot(10, hoursPerSession), phase: phases[0], duration: hoursPerSession },
+        { id: "epi-2", day: getDayName(2), timeSlot: formatTimeSlot(14, hoursPerSession), phase: phases[1], duration: hoursPerSession },
+        { id: "epi-3", day: getDayName(3), timeSlot: formatTimeSlot(18, hoursPerSession), phase: phases[2], duration: hoursPerSession }
+      ];
+    }
   }
 
   // Ensure unique IDs
@@ -670,12 +862,13 @@ Return a JSON array of focus sessions exactly matching this schema:
     taskTitle: task.title,
     items: formattedItems,
     approved: false,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    referenceTime: localTime || new Date().toString()
   };
 
   if (!isStateless && store) {
-    // Remove previous unapproved plans for this task
-    store.executionPlans = store.executionPlans.filter((p: ExecutionPlan) => p.taskId !== task.id || p.approved);
+    store.executionPlans = store.executionPlans.filter((p: ExecutionPlan) => p.taskId !== task.id);
+    store.calendarEvents = store.calendarEvents.filter((e: any) => e.taskId !== task.id);
     store.executionPlans.push(newPlan);
     writeData(store);
   }
@@ -703,21 +896,13 @@ app.post('/api/ai/plan/approve', (req, res) => {
 
   // Add focus blocks to simulated calendar events
   plan.items.forEach((item, idx) => {
-    let dayOffset = 0;
-    if (item.day.toLowerCase() === 'tomorrow') dayOffset = 1;
-    else if (item.day.toLowerCase().includes('sat')) dayOffset = 2;
-    else if (item.day.toLowerCase().includes('sun')) dayOffset = 3;
-    else if (item.day.toLowerCase().includes('mon')) dayOffset = 4;
-
-    const baseDate = new Date(Date.now() + dayOffset * 24 * 60 * 60 * 1000);
-    // Rough timeslot mapping
-    let hour = 18; // default 6 PM
-    if (item.timeSlot.includes('2 PM')) hour = 14;
-    else if (item.timeSlot.includes('7 PM')) hour = 19;
-    else if (item.timeSlot.includes('10 PM')) hour = 22;
-
-    const start = new Date(baseDate.setHours(hour, 0, 0, 0)).toISOString().substring(0, 16);
-    const end = new Date(baseDate.setHours(hour + item.duration, 0, 0, 0)).toISOString().substring(0, 16);
+    const { start, end } = computeSessionStartAndEnd(
+      item.day,
+      item.timeSlot,
+      item.duration,
+      plan.referenceTime,
+      plan.createdAt
+    );
 
     const newCalEvent: CalendarEvent = {
       id: `cal-focus-${Date.now()}-${idx}`,
@@ -1109,8 +1294,8 @@ Return a JSON response matching:
             currentEnd.setDate(currentEnd.getDate() + 1);
             return {
               ...evt,
-              start: currentStart.toISOString().substring(0, 16),
-              end: currentEnd.toISOString().substring(0, 16)
+              start: currentStart.toISOString(),
+              end: currentEnd.toISOString()
             };
           }
           return evt;
@@ -1223,8 +1408,8 @@ Return a JSON response matching:
         currentEnd.setDate(currentEnd.getDate() + 1);
         return {
           ...evt,
-          start: currentStart.toISOString().substring(0, 16),
-          end: currentEnd.toISOString().substring(0, 16)
+          start: currentStart.toISOString(),
+          end: currentEnd.toISOString()
         };
       }
       return evt;

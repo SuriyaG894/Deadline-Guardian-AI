@@ -227,15 +227,15 @@ export default function App() {
             {
               id: "cal-1",
               title: "Team Sync Meeting",
-              start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
-              end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().substring(0, 16),
+              start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+              end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
               isFocusSession: false
             },
             {
               id: "cal-2",
               title: "System Design Mock Interview",
-              start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
-              end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString().substring(0, 16),
+              start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
+              end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString(),
               isFocusSession: false
             }
           ];
@@ -311,7 +311,23 @@ export default function App() {
     if (!user) return;
     setIsGeneratingPlan(true);
     try {
-      const plan = await generateExecutionPlan(taskId, tasks, events);
+      // Delete previous execution plans for this task
+      const userPlans = await getUserPlans(user.uid);
+      const plansToDelete = userPlans.filter(p => p.taskId === taskId);
+      for (const p of plansToDelete) {
+        await deleteUserPlan(user.uid, p.id);
+      }
+
+      // Delete previous calendar focus events for this task
+      const userEvents = await getUserEvents(user.uid);
+      const eventsToDelete = userEvents.filter(e => e.taskId === taskId && e.isFocusSession);
+      for (const ev of eventsToDelete) {
+        await deleteUserEvent(user.uid, ev.id);
+      }
+
+      // Generate execution plan excluding current task's own focus sessions from the conflict list
+      const filteredEvents = events.filter(e => e.taskId !== taskId);
+      const plan = await generateExecutionPlan(taskId, tasks, filteredEvents, new Date().toString());
       await saveUserPlan(user.uid, plan.id, plan);
       setActivePlan(plan);
       refreshAllData();

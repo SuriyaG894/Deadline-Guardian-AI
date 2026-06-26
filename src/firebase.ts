@@ -414,22 +414,22 @@ export async function seedUserData(uid: string, email: string, name: string) {
     {
       id: "cal-1",
       title: "Team Sync Meeting",
-      start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
-      end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString().substring(0, 16),
+      start: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(),
+      end: new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString(),
       isFocusSession: false
     },
     {
       id: "cal-2",
       title: "System Design Mock Interview",
-      start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString().substring(0, 16),
-      end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString().substring(0, 16),
+      start: new Date(Date.now() + 24 * 60 * 60 * 1000 + 2 * 60 * 60 * 1000).toISOString(),
+      end: new Date(Date.now() + 24 * 60 * 60 * 1000 + 3.5 * 60 * 60 * 1000).toISOString(),
       isFocusSession: false
     },
     {
       id: "cal-focus-1",
       title: "🎯 Focus: Backend Dev",
-      start: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString().substring(0, 16),
-      end: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString().substring(0, 16),
+      start: new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString(),
+      end: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
       isFocusSession: true,
       taskId: "task-1"
     }
