@@ -88,26 +88,7 @@ export default function AuthPage() {
     }
   };
 
-  const handleDemoSignIn = async () => {
-    setError(null);
-    setLoading(true);
-    try {
-      const demoUser = {
-        uid: 'demo-user',
-        email: 'demo@guardian.ai',
-        displayName: 'Demo Commander'
-      };
-      localStorage.setItem('guardian_demo_user', JSON.stringify(demoUser));
-      // Seed user data locally
-      await seedUserData(demoUser.uid, demoUser.email, demoUser.displayName);
-      window.location.reload();
-    } catch (err: any) {
-      console.error(err);
-      setError('Failed to initialize local sandbox mode.');
-    } finally {
-      setLoading(false);
-    }
-  };
+
 
   return (
     <div className="min-h-screen bg-[#050505] flex flex-col justify-center items-center px-4 relative overflow-hidden" id="auth-page-root">
@@ -251,15 +232,7 @@ export default function AuthPage() {
             <span>Continue with Google</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handleDemoSignIn}
-            disabled={loading}
-            className="w-full h-11 bg-red-950/30 border border-red-900/40 hover:bg-red-900/20 text-red-400 hover:text-red-300 font-bold rounded-xl text-xs transition duration-150 flex items-center justify-center gap-2.5 cursor-pointer uppercase shadow-[0_0_15px_rgba(220,38,38,0.1)]"
-          >
-            <Sparkles className="w-4 h-4 text-red-500 animate-pulse" />
-            <span>Enter Demo Sandbox Mode</span>
-          </button>
+
         </div>
 
 
