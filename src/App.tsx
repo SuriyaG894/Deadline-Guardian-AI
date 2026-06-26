@@ -138,6 +138,25 @@ export default function App() {
           }
         }
 
+        // Auto-prune orphaned focus sessions and execution plans (for previously deleted goals)
+        const validTaskIds = new Set(tasksList.map(t => t.id));
+        
+        const orphanedEvents = eventsList.filter(e => e.isFocusSession && e.taskId && !validTaskIds.has(e.taskId));
+        if (orphanedEvents.length > 0) {
+          for (const orphan of orphanedEvents) {
+            deleteUserEvent(uid, orphan.id).catch(e => console.error("Error pruning orphan event:", e));
+          }
+          eventsList = eventsList.filter(e => !e.isFocusSession || !e.taskId || validTaskIds.has(e.taskId));
+        }
+
+        const orphanedPlans = plansList.filter(p => p.taskId && !validTaskIds.has(p.taskId));
+        if (orphanedPlans.length > 0) {
+          for (const p of orphanedPlans) {
+            deleteUserPlan(uid, p.id).catch(e => console.error("Error pruning orphan plan:", e));
+          }
+          plansList = plansList.filter(p => !p.taskId || validTaskIds.has(p.taskId));
+        }
+
         setTasks(tasksList as Task[]);
         setEvents(eventsList as CalendarEvent[]);
         setNotifications(notificationsList as SystemNotification[]);
@@ -303,6 +322,24 @@ export default function App() {
     if (!user) return;
     try {
       await deleteUserTask(user.uid, taskId);
+      
+      // Delete associated events
+      const userEvents = await getUserEvents(user.uid);
+      const eventsToDelete = userEvents.filter(e => e.taskId === taskId);
+      for (const ev of eventsToDelete) {
+        await deleteUserEvent(user.uid, ev.id);
+      }
+
+      // Delete associated plans
+      const userPlans = await getUserPlans(user.uid);
+      const plansToDelete = userPlans.filter(p => p.taskId === taskId);
+      for (const p of plansToDelete) {
+        await deleteUserPlan(user.uid, p.id);
+      }
+
+      // Sync backend server data-store
+      await deleteTask(taskId);
+      
       refreshAllData();
     } catch (e) {
       console.error(e);

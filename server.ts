@@ -151,7 +151,16 @@ function getData() {
   initializeDataStore();
   try {
     const fileContent = fs.readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(fileContent);
+    const store = JSON.parse(fileContent);
+    if (store && Array.isArray(store.tasks) && Array.isArray(store.calendarEvents)) {
+      const taskIds = new Set(store.tasks.map((t: any) => t.id));
+      const hasOrphans = store.calendarEvents.some((e: any) => e.isFocusSession && e.taskId && !taskIds.has(e.taskId));
+      if (hasOrphans) {
+        store.calendarEvents = store.calendarEvents.filter((e: any) => !e.isFocusSession || !e.taskId || taskIds.has(e.taskId));
+        fs.writeFileSync(DATA_FILE, JSON.stringify(store, null, 2));
+      }
+    }
+    return store;
   } catch (err) {
     console.error("Error reading data file:", err);
     return null;
@@ -439,6 +448,7 @@ app.delete('/api/tasks/:id', (req, res) => {
   const { id } = req.params;
   const store = getData();
   store.tasks = store.tasks.filter((t: Task) => t.id !== id);
+  store.calendarEvents = store.calendarEvents.filter((e: any) => e.taskId !== id);
   writeData(store);
   res.json({ success: true });
 });
