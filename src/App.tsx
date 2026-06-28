@@ -5,16 +5,16 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  Bot, ShieldAlert, Sparkles, Plus, CheckCircle, 
-  Trash2, Layers, Calendar, AlertTriangle, ShieldCheck, 
-  HelpCircle, RefreshCw, BarChart2, Bell, CheckSquare, 
-  TrendingUp, CircleAlert, HelpCircle as HelpIcon, LogOut 
+import {
+  Bot, ShieldAlert, Sparkles, Plus, CheckCircle,
+  Trash2, Layers, Calendar, AlertTriangle, ShieldCheck,
+  HelpCircle, RefreshCw, BarChart2, Bell, CheckSquare,
+  TrendingUp, CircleAlert, HelpCircle as HelpIcon, LogOut
 } from 'lucide-react';
-import { 
-  fetchTasks, updateTask, deleteTask, fetchCalendarEvents, 
-  toggleCalendarConnection, generateExecutionPlan, fetchAnalytics, 
-  fetchNotifications, markNotificationsRead, toggleRescueMode 
+import {
+  fetchTasks, updateTask, deleteTask, fetchCalendarEvents,
+  toggleCalendarConnection, generateExecutionPlan, fetchAnalytics,
+  fetchNotifications, markNotificationsRead, toggleRescueMode
 } from './api';
 import { Task, CalendarEvent, ExecutionPlan, SystemNotification, Analytics } from './types';
 import VoiceAndChat from './components/VoiceAndChat';
@@ -23,23 +23,24 @@ import CalendarView from './components/CalendarView';
 import ExecutionPlanView from './components/ExecutionPlanView';
 import CheckInModal from './components/CheckInModal';
 import AuthPage from './components/AuthPage';
-import { 
-  auth, 
-  getUserMetadata, 
-  getUserTasks, 
-  getUserEvents, 
-  getUserNotifications, 
-  getUserPlans, 
-  saveUserMetadata, 
-  saveUserTask, 
-  saveUserEvent, 
-  saveUserNotification, 
-  saveUserPlan, 
-  deleteUserTask, 
-  deleteUserEvent, 
+import HelpTour from './components/HelpTour';
+import {
+  auth,
+  getUserMetadata,
+  getUserTasks,
+  getUserEvents,
+  getUserNotifications,
+  getUserPlans,
+  saveUserMetadata,
+  saveUserTask,
+  saveUserEvent,
+  saveUserNotification,
+  saveUserPlan,
+  deleteUserTask,
+  deleteUserEvent,
   deleteUserPlan,
   deleteUserNotification,
-  clearUserNotifications, 
+  clearUserNotifications,
   signInWithGoogleCalendar,
   logoutUser
 } from './firebase';
@@ -61,6 +62,7 @@ export default function App() {
 
   // Form states
   const [showTaskForm, setShowTaskForm] = useState(false);
+  const [showTour, setShowTour] = useState(false);
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
 
   // Check-in modal states
@@ -72,6 +74,37 @@ export default function App() {
 
   const refreshAllData = () => {
     setRefreshTrigger(prev => prev + 1);
+  };
+
+  // Request Notification Permissions on Startup
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        console.log('Notification permission status:', permission);
+      });
+    }
+  }, []);
+
+  // Helper to trigger native OS/mobile browser notification bar alerts
+  const triggerNativeNotification = (title: string, body: string) => {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.ready.then(reg => {
+          reg.showNotification(title, {
+            body,
+            icon: '/favicon.ico',
+            vibrate: [200, 100, 200],
+            tag: 'guardian-alert'
+          } as any);
+        });
+      } else {
+        new Notification(title, {
+          body,
+          icon: '/favicon.ico'
+        });
+      }
+    }
   };
 
   // Auth State Listener
@@ -94,12 +127,12 @@ export default function App() {
   // Sync state from Firestore when user changes or updates
   useEffect(() => {
     if (!user) return;
-    
+
     async function loadUserData() {
       try {
         const uid = user.uid;
         const isDemoUser = uid === 'demo-user';
-        
+
         let [tasksList, eventsList, notificationsList, plansList, metadata] = await Promise.all([
           getUserTasks(uid),
           getUserEvents(uid),
@@ -224,7 +257,7 @@ export default function App() {
 
         // Auto-prune orphaned focus sessions and execution plans (for previously deleted goals)
         const validTaskIds = new Set(tasksList.map(t => t.id));
-        
+
         const orphanedEvents = eventsList.filter(e => e.isFocusSession && e.taskId && !validTaskIds.has(e.taskId));
         if (orphanedEvents.length > 0) {
           for (const orphan of orphanedEvents) {
@@ -265,7 +298,12 @@ export default function App() {
         setBombFrequency(metadata?.bombFrequency || 5);
         setCalendarConnected(isConnected);
 
-        const validPlans = (plansList || []).filter((p: any) => 
+        // Auto trigger the briefing tour for users who haven't completed it yet
+        if (metadata && !metadata.hasCompletedTour) {
+          setShowTour(true);
+        }
+
+        const validPlans = (plansList || []).filter((p: any) =>
           tasksList.some((t: any) => t.id === p.taskId)
         );
 
@@ -294,7 +332,7 @@ export default function App() {
   // Cost-effective Google Calendar Polling (every 10 minutes) & Sync on Tab Focus
   useEffect(() => {
     if (!user) return;
-    
+
     const pollInterval = setInterval(() => {
       refreshAllData();
     }, 600000); // 10 minutes
@@ -316,33 +354,39 @@ export default function App() {
     const checkInterval = setInterval(() => {
       const now = new Date();
       const nowTime = now.getTime();
-      
+
       let changedEvents = false;
       const updatedEvents = events.map(evt => {
         const startTime = new Date(evt.start).getTime();
         const endTime = new Date(evt.end).getTime();
-        
+
         // 1. Pre-session Notification Bomb (15m before event start)
         const timeToStart = startTime - nowTime;
         const fifteenMinutes = 15 * 60 * 1000;
-        
+
         if (timeToStart > 0 && timeToStart <= fifteenMinutes && !evt.checkedIn && !evt.acknowledged) {
           const freqMs = bombFrequency * 60 * 1000;
           const lastBomb = evt.lastBombTime ? new Date(evt.lastBombTime).getTime() : 0;
           if (nowTime - lastBomb >= freqMs) {
             const minsLeft = Math.round(timeToStart / 60000);
             const notifId = `bomb-${evt.id}-${nowTime}`;
-            
+
+            const message = `🚨 Guardian Alert: "${evt.title}" starts in ${minsLeft} minutes! Get ready.`;
             const newNotif = {
               id: notifId,
               type: 'warning' as const,
-              message: `🚨 Guardian Alert: "${evt.title}" starts in ${minsLeft} minutes! Get ready.`,
+              message,
               timestamp: now.toISOString(),
               read: false,
               eventId: evt.id
             };
             saveUserNotification(user.uid, notifId, newNotif).catch(e => console.error(e));
-            
+
+            triggerNativeNotification(
+              `🚨 Guardian Alert: "${evt.title}" Starting Soon`,
+              `Focus session starts in ${minsLeft} minutes! Get ready.`
+            );
+
             // Play alarm sound
             try {
               const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -352,42 +396,48 @@ export default function App() {
               osc.connect(ctx.destination);
               osc.start();
               osc.stop(ctx.currentTime + 0.1);
-            } catch (err) {}
-            
+            } catch (err) { }
+
             evt.lastBombTime = now.toISOString();
             changedEvents = true;
             saveUserEvent(user.uid, evt.id, { lastBombTime: evt.lastBombTime }).catch(e => console.error(e));
           }
         }
-        
+
         // 2. Post-session Check-in Prompt (after focus session end time)
         if (evt.isFocusSession && nowTime >= endTime && !evt.checkedIn) {
           const postNotifId = `postcheck-${evt.id}`;
           const hasPostNotif = notifications.some(n => n.id === postNotifId);
           if (!hasPostNotif) {
+            const message = `⏱️ Focus session "${evt.title}" has ended. Please log your progress.`;
             const newNotif = {
               id: postNotifId,
               type: 'info' as const,
-              message: `⏱️ Focus session "${evt.title}" has ended. Please log your progress.`,
+              message,
               timestamp: now.toISOString(),
               read: false,
               eventId: evt.id,
               isPostSessionPrompt: true
             };
             saveUserNotification(user.uid, postNotifId, newNotif).catch(e => console.error(e));
+
+            triggerNativeNotification(
+              `⏱️ Focus Session Ended`,
+              `"${evt.title}" has finished. Please check in and log your progress.`
+            );
             // Trigger Check-in modal
             setCheckInTask({ id: evt.taskId!, title: evt.title, eventId: evt.id });
           }
         }
-        
+
         return evt;
       });
-      
+
       if (changedEvents) {
         setEvents(updatedEvents);
       }
     }, 10000);
-    
+
     return () => clearInterval(checkInterval);
   }, [user, events, bombFrequency, notifications]);
 
@@ -404,12 +454,12 @@ export default function App() {
           refreshAllData();
           return;
         }
-        
+
         const data = await toggleCalendarConnection();
         setCalendarConnected(data.connected);
         setCalendarError(null);
         await saveUserMetadata(user.uid, { calendarConnected: false, googleAccessToken: null });
-        
+
         // Remove existing events from firestore
         const oldEvents = await getUserEvents(user.uid);
         for (const ev of oldEvents) {
@@ -462,7 +512,7 @@ export default function App() {
           setCalendarConnected(data.connected);
           setCalendarError(null);
           await saveUserMetadata(user.uid, { calendarConnected: true, googleAccessToken: token });
-          
+
           // Save loaded events to firestore
           if (data.events && Array.isArray(data.events)) {
             for (const ev of data.events) {
@@ -555,7 +605,7 @@ export default function App() {
     if (!user) return;
     try {
       await deleteUserTask(user.uid, taskId);
-      
+
       // Delete associated events
       const userEvents = await getUserEvents(user.uid);
       const eventsToDelete = userEvents.filter(e => e.taskId === taskId);
@@ -572,7 +622,7 @@ export default function App() {
 
       // Sync backend server data-store
       await deleteTask(taskId);
-      
+
       refreshAllData();
     } catch (e) {
       console.error(e);
@@ -686,6 +736,16 @@ export default function App() {
               </select>
             </div>
 
+            {/* System Briefing Tour Trigger */}
+            <button
+              id="help-tour-trigger"
+              onClick={() => setShowTour(true)}
+              className="p-2.5 bg-[#111114] hover:bg-[#1c1c21] border border-[#262626] rounded-xl text-zinc-400 hover:text-white transition duration-150 cursor-pointer relative"
+              title="System Briefing Tour"
+            >
+              <HelpCircle className="w-4 h-4" />
+            </button>
+
             {/* Notification Tray */}
             <div className="relative group">
               <button className="p-2.5 bg-[#111114] hover:bg-[#1c1c21] border border-[#262626] rounded-xl text-zinc-400 hover:text-white transition duration-150 cursor-pointer relative">
@@ -696,7 +756,7 @@ export default function App() {
                   </span>
                 )}
               </button>
-              
+
               {/* Dropdown list wrapper with pt-2 to bridge the hover gap */}
               <div className="absolute right-0 top-full pt-2 w-80 pointer-events-none group-hover:pointer-events-auto opacity-0 group-hover:opacity-100 group-hover:translate-y-0 translate-y-1 transition duration-200 z-50">
                 <div className="bg-[#111114] border border-[#262626] rounded-2xl shadow-2xl p-4 space-y-2">
@@ -711,19 +771,18 @@ export default function App() {
                   <div className="space-y-2 max-h-[220px] overflow-y-auto scrollbar-none">
                     {notifications.length > 0 ? (
                       notifications.map(n => (
-                        <div key={n.id} className={`p-2.5 rounded-xl border text-[11px] space-y-2 ${
-                          n.type === 'rescue' 
-                            ? 'bg-red-950/20 border-red-900/40 text-red-300' 
+                        <div key={n.id} className={`p-2.5 rounded-xl border text-[11px] space-y-2 ${n.type === 'rescue'
+                            ? 'bg-red-950/20 border-red-900/40 text-red-300'
                             : n.type === 'warning'
-                            ? 'bg-amber-950/20 border-amber-900/40 text-amber-300'
-                            : 'bg-zinc-900 border-[#262626] text-zinc-300'
-                        }`}>
+                              ? 'bg-amber-950/20 border-amber-900/40 text-amber-300'
+                              : 'bg-zinc-900 border-[#262626] text-zinc-300'
+                          }`}>
                           <p className="font-semibold leading-relaxed">{n.message}</p>
                           <div className="flex items-center justify-between gap-2 mt-1">
                             <span className="text-[9px] text-zinc-500 font-mono">
                               {new Date(n.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
-                            
+
                             {n.eventId && (
                               <div className="flex gap-1.5">
                                 {n.isTaskCompletionPrompt ? (
@@ -798,37 +857,35 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6 z-10">
-        
+
         {/* Row 1: Active Rescue banner & Quick Metrics Bento Section */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4" id="bento-metrics-grid">
           {/* Rescue Indicator card */}
-          <div className={`md:col-span-2 p-6 rounded-3xl border flex flex-col justify-between transition duration-300 relative overflow-hidden ${
-            rescueMode
+          <div id="help-rescue-card" className={`md:col-span-2 p-6 rounded-3xl border flex flex-col justify-between transition duration-300 relative overflow-hidden ${rescueMode
               ? 'bg-red-600 border-red-500 text-white shadow-[0_0_25px_rgba(220,38,38,0.25)]'
               : 'bg-[#111114] border-[#262626] text-zinc-300'
-          }`}>
+            }`}>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <span className={`w-2.5 h-2.5 rounded-full ${rescueMode ? 'bg-white animate-ping' : 'bg-red-500'}`} />
                 <h3 className="text-xs font-bold uppercase tracking-widest text-zinc-400">Emergency Rescue Protocol</h3>
               </div>
               <p className="text-sm font-medium leading-relaxed">
-                {rescueMode 
+                {rescueMode
                   ? "CRITICAL BOTTLENECK: High Risk (>80%) detected. Schedule compressed, non-critical items deferred, and emergency overtime guides initialized."
                   : "Deadline margin levels are healthy. If a focus session is missed or risk exceeds 80%, the system will automatically activate Rescue Mode."
                 }
               </p>
             </div>
-            
+
             <div className="flex items-center justify-between pt-3 border-t border-zinc-800/40 mt-4">
               <span className="text-[9px] font-mono uppercase tracking-wider text-zinc-500 font-semibold">Test Trigger Override</span>
               <button
                 onClick={handleToggleRescue}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition cursor-pointer ${
-                  rescueMode
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition cursor-pointer ${rescueMode
                     ? 'bg-white text-red-600 shadow-xl'
                     : 'bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-white'
-                }`}
+                  }`}
               >
                 {rescueMode ? "DEACTIVATE RESCUE" : "FORCE RESCUE"}
               </button>
@@ -836,7 +893,7 @@ export default function App() {
           </div>
 
           {/* Productivity Score Bento Card */}
-          <div className="p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between">
+          <div id="help-productivity-metrics" className="p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between">
             <div className="flex justify-between items-start">
               <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Productivity Index</h3>
               <TrendingUp className="w-4 h-4 text-red-500" />
@@ -848,9 +905,9 @@ export default function App() {
               <div className="text-[10px] text-zinc-400 mt-1 uppercase font-mono tracking-wider">Optimized Capacity</div>
             </div>
             <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-              <div 
-                className="bg-red-600 h-full transition-all duration-500" 
-                style={{ width: `${analytics ? analytics.productivityScore : 100}%` }} 
+              <div
+                className="bg-red-600 h-full transition-all duration-500"
+                style={{ width: `${analytics ? analytics.productivityScore : 100}%` }}
               />
             </div>
           </div>
@@ -873,17 +930,17 @@ export default function App() {
 
         {/* Row 2: Goals / Task Dashboard & Voice Terminal (Side-by-Side) */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
+
           {/* Left panel: Task tracker list (Bento size 7/12) */}
-          <div className="lg:col-span-7 space-y-4">
-            
+          <div id="help-goals-section" className="lg:col-span-7 space-y-4">
+
             {/* Interactive Header */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CheckSquare className="w-5 h-5 text-red-500" />
                 <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-300">Monitored Goals</h2>
               </div>
-              
+
               {!showTaskForm && (
                 <button
                   onClick={() => setShowTaskForm(true)}
@@ -915,13 +972,12 @@ export default function App() {
                   <motion.div
                     key={task.id}
                     layout
-                    className={`bg-[#111114] border rounded-3xl p-5 transition duration-200 ${
-                      task.status === 'completed'
+                    className={`bg-[#111114] border rounded-3xl p-5 transition duration-200 ${task.status === 'completed'
                         ? 'border-[#262626] opacity-60'
                         : task.risk > 70
-                        ? 'border-red-900/60 hover:border-red-500 shadow-md shadow-red-950/10'
-                        : 'border-[#262626] hover:border-zinc-700'
-                    }`}
+                          ? 'border-red-900/60 hover:border-red-500 shadow-md shadow-red-950/10'
+                          : 'border-[#262626] hover:border-zinc-700'
+                      }`}
                   >
                     <div className="flex flex-col md:flex-row md:items-start justify-between gap-3">
                       <div className="space-y-1.5 flex-1">
@@ -929,20 +985,19 @@ export default function App() {
                           <span className="text-[9px] font-mono uppercase bg-zinc-800 text-zinc-300 px-2 py-0.5 rounded-md border border-zinc-700">
                             {task.category}
                           </span>
-                          <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-md border ${
-                            task.difficulty === 'High'
+                          <span className={`text-[9px] font-mono uppercase px-2 py-0.5 rounded-md border ${task.difficulty === 'High'
                               ? 'bg-red-950/40 border-red-900/50 text-red-300'
                               : task.difficulty === 'Medium'
-                              ? 'bg-amber-950/40 border-amber-900/50 text-amber-300'
-                              : 'bg-emerald-950/40 border-emerald-900/50 text-emerald-300'
-                          }`}>
+                                ? 'bg-amber-950/40 border-amber-900/50 text-amber-300'
+                                : 'bg-emerald-950/40 border-emerald-900/50 text-emerald-300'
+                            }`}>
                             {task.difficulty} Complexity
                           </span>
                           <span className="text-[10px] font-mono text-zinc-400">
                             {getDaysLeftText(task.deadline)}
                           </span>
                         </div>
-                        
+
                         <h3 className={`text-sm font-bold ${task.status === 'completed' ? 'line-through text-zinc-500' : 'text-white'}`}>
                           {task.title}
                         </h3>
@@ -958,17 +1013,16 @@ export default function App() {
                               Deadline Risk: {task.risk}%
                             </span>
                           </div>
-                          
+
                           <div className="w-full bg-zinc-900 h-2 border border-zinc-800/80 rounded-full overflow-hidden relative">
-                            <div 
-                              className={`h-full transition-all duration-300 ${
-                                task.status === 'completed' 
-                                  ? 'bg-zinc-600' 
-                                  : task.risk > 70 
-                                  ? 'bg-red-600 shadow-md shadow-red-500/20' 
-                                  : 'bg-red-500'
-                              }`}
-                              style={{ width: `${task.progress}%` }} 
+                            <div
+                              className={`h-full transition-all duration-300 ${task.status === 'completed'
+                                  ? 'bg-zinc-600'
+                                  : task.risk > 70
+                                    ? 'bg-red-600 shadow-md shadow-red-500/20'
+                                    : 'bg-red-500'
+                                }`}
+                              style={{ width: `${task.progress}%` }}
                             />
                           </div>
                         </div>
@@ -1020,8 +1074,8 @@ export default function App() {
           </div>
 
           {/* Right panel: AI Chief of Staff Voice/Chat Console (Bento size 5/12) */}
-          <div className="lg:col-span-5 h-full flex flex-col justify-between">
-            <VoiceAndChat 
+          <div id="help-chat-section" className="lg:col-span-5 h-full flex flex-col justify-between">
+            <VoiceAndChat
               onRefreshData={refreshAllData}
               activeTaskId={tasks.length > 0 ? tasks[0].id : undefined}
               tasks={tasks}
@@ -1034,28 +1088,32 @@ export default function App() {
 
         {/* Row 3: Calendar timeline and AI Strategy Plan (Split 50-50) */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          
+
           {/* Calendar visualizer */}
-          <CalendarView
-            events={events}
-            tasks={tasks}
-            isConnected={calendarConnected}
-            onToggleConnect={handleToggleCalendar}
-            onTriggerCheckin={handleTriggerCheckIn}
-            error={calendarError}
-            onClearError={() => setCalendarError(null)}
-            onRefresh={refreshAllData}
-          />
+          <div id="help-calendar-section" className="w-full">
+            <CalendarView
+              events={events}
+              tasks={tasks}
+              isConnected={calendarConnected}
+              onToggleConnect={handleToggleCalendar}
+              onTriggerCheckin={handleTriggerCheckIn}
+              error={calendarError}
+              onClearError={() => setCalendarError(null)}
+              onRefresh={refreshAllData}
+            />
+          </div>
 
           {/* AI Session execution plans review */}
-          <ExecutionPlanView
-            plan={activePlan}
-            isGenerating={isGeneratingPlan}
-            onPlanApproved={refreshAllData}
-            onRegenerate={() => {
-              if (activePlan) handleTriggerAIPlan(activePlan.taskId);
-            }}
-          />
+          <div id="help-plan-section" className="w-full">
+            <ExecutionPlanView
+              plan={activePlan}
+              isGenerating={isGeneratingPlan}
+              onPlanApproved={refreshAllData}
+              onRegenerate={() => {
+                if (activePlan) handleTriggerAIPlan(activePlan.taskId);
+              }}
+            />
+          </div>
 
         </div>
 
@@ -1083,7 +1141,7 @@ export default function App() {
                 const taskFocusEvents = events.filter(e => e.taskId === taskId && e.isFocusSession);
                 const otherEvents = taskFocusEvents.filter(e => e.id !== eventId);
                 const allOthersCheckedIn = otherEvents.every(e => e.checkedIn);
-                
+
                 if (allOthersCheckedIn) {
                   const notifId = `completeprompt-${taskId}`;
                   const newNotif = {
@@ -1105,6 +1163,22 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Onboarding briefing tour overlay */}
+      <HelpTour
+        isOpen={showTour}
+        onComplete={async () => {
+          setShowTour(false);
+          if (user) {
+            try {
+              await saveUserMetadata(user.uid, { hasCompletedTour: true });
+              refreshAllData();
+            } catch (err) {
+              console.error("Failed to save tour completed metadata:", err);
+            }
+          }
+        }}
+      />
 
       {/* Footer */}
       <footer className="border-t border-[#262626] mt-12 py-6 bg-[#050505]">

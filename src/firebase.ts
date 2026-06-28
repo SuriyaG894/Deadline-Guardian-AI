@@ -1,22 +1,22 @@
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPopup, 
+import {
+  getAuth,
+  signInWithPopup,
   linkWithPopup,
-  GoogleAuthProvider, 
-  signInWithEmailAndPassword, 
+  GoogleAuthProvider,
+  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
   signOut
 } from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  doc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
   addDoc,
   query,
   orderBy,
@@ -111,6 +111,7 @@ export interface UserMetadata {
   rescueMode: boolean;
   googleAccessToken?: string | null;
   bombFrequency?: number;
+  hasCompletedTour?: boolean;
 }
 
 // 1. User Profile Document Schema
