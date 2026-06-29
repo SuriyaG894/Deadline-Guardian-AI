@@ -802,6 +802,388 @@ app.post('/api/calendar/connect', async (req, res) => {
 // AI Endpoints
 // -----------------------------------------------------
 
+// Brain Dump endpoint - parses text and generates task list + schedule
+app.post('/api/ai/braindump', async (req, res) => {
+  const { text, localTime, tasks: reqTasks, calendarEvents: reqEvents } = req.body;
+  const isStateless = Array.isArray(reqTasks);
+  const store = isStateless ? null : getData();
+  const currentTasks = isStateless ? reqTasks : store.tasks;
+  const currentEvents = isStateless ? reqEvents : store.calendarEvents;
+
+  const aiClient = getGeminiClient();
+  let extracted: any = null;
+
+  if (aiClient) {
+    try {
+      const prompt = `You are the Deadline Guardian AI Chief of Staff.
+A user has provided a "Brain Dump" containing project specs, a syllabus, an email, or slack messages.
+Analyze this text to extract:
+1. A list of distinct tasks/milestones.
+2. For each task, estimate the hours needed, complexity/difficulty, priority, category, and a realistic deadline date (in YYYY-MM-DD format) based on the user's current date/time context.
+3. A set of calendar focus sessions (work windows) for these tasks. Map 1 to 3 focus sessions per task, scheduling them in the future relative to the user's current date/time. Do not overlap sessions.
+
+User's brain dump text:
+"""
+${text}
+"""
+
+Current Date/Time Context (use this as the reference for "Today" and calculating deadlines/schedules):
+${localTime || new Date().toString()}
+
+Return a JSON object exactly matching this schema:
+{
+  "tasks": [
+    {
+      "tempId": "string (temporary id to link with focus sessions, e.g. 'task-a', 'task-b')",
+      "title": "string (clear, action-oriented title)",
+      "description": "string (brief summary of what needs to be done)",
+      "deadline": "string (YYYY-MM-DD format, must be in the future)",
+      "estimatedHours": number,
+      "category": "string (e.g., 'Tech', 'Career', 'Admin', 'Marketing')",
+      "priority": "low" | "medium" | "high",
+      "difficulty": "Low" | "Medium" | "High"
+    }
+  ],
+  "focusSessions": [
+    {
+      "taskTempId": "string (must match one of the task tempIds defined above)",
+      "day": "Today" | "Tomorrow" | "Monday" | "Tuesday" | "Wednesday" | "Thursday" | "Friday" | "Saturday" | "Sunday",
+      "timeSlot": "string (e.g. '2 PM–4 PM', '6 PM–8 PM', '9 AM–11 AM')",
+      "phase": "string (brief description of focus session goal, e.g., 'Draft project pitch')",
+      "duration": number (duration in hours, e.g., 2)
+    }
+  ]
+}
+`;
+
+      const response = await generateContentWithFallback(aiClient, {
+        model: 'gemini-3.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              tasks: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    tempId: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    deadline: { type: Type.STRING },
+                    estimatedHours: { type: Type.INTEGER },
+                    category: { type: Type.STRING },
+                    priority: { type: Type.STRING },
+                    difficulty: { type: Type.STRING }
+                  },
+                  required: ["tempId", "title", "description", "deadline", "estimatedHours", "category", "priority", "difficulty"]
+                }
+              },
+              focusSessions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    taskTempId: { type: Type.STRING },
+                    day: { type: Type.STRING },
+                    timeSlot: { type: Type.STRING },
+                    phase: { type: Type.STRING },
+                    duration: { type: Type.INTEGER }
+                  },
+                  required: ["taskTempId", "day", "timeSlot", "phase", "duration"]
+                }
+              }
+            },
+            required: ["tasks", "focusSessions"]
+          }
+        }
+      });
+
+      const textResult = response.text || "{}";
+      extracted = JSON.parse(textResult.trim());
+    } catch (e) {
+      console.error("Gemini brain dump failed, using fallback:", e);
+    }
+  }
+
+  // Fallback if Gemini failed or is not available
+  if (!extracted) {
+    extracted = {
+      tasks: [
+        {
+          tempId: "task-fallback-1",
+          title: "Setup Architecture & Project Core",
+          description: "Initialize workspace, dependencies, and environment files.",
+          deadline: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          estimatedHours: 6,
+          category: "Tech",
+          priority: "high",
+          difficulty: "Medium"
+        },
+        {
+          tempId: "task-fallback-2",
+          title: "Feature Implementation & APIs",
+          description: "Develop primary application routes and core integrations.",
+          deadline: new Date(Date.now() + 4 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          estimatedHours: 12,
+          category: "Tech",
+          priority: "high",
+          difficulty: "High"
+        }
+      ],
+      focusSessions: [
+        {
+          taskTempId: "task-fallback-1",
+          day: "Today",
+          timeSlot: "4 PM–6 PM",
+          phase: "Initialize repository & config",
+          duration: 2
+        },
+        {
+          taskTempId: "task-fallback-2",
+          day: "Tomorrow",
+          timeSlot: "2 PM–4 PM",
+          phase: "Build endpoint routes",
+          duration: 2
+        }
+      ]
+    };
+  }
+
+  const finalTasks: Task[] = [];
+  const finalEvents: CalendarEvent[] = [];
+  const tempIdToRealIdMap = new Map<string, string>();
+
+  // Process Tasks
+  extracted.tasks.forEach((t: any, idx: number) => {
+    const realId = "task-" + Date.now() + "-" + idx;
+    tempIdToRealIdMap.set(t.tempId, realId);
+
+    // Calculate risk
+    const deadlineDate = t.deadline || new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const hours = Number(t.estimatedHours) || 6;
+    const fallbackDays = Math.max(1, Math.ceil((new Date(deadlineDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+    const riskScore = Math.min(95, Math.round((hours / (fallbackDays * 4)) * 100));
+
+    const newTask: Task = {
+      id: realId,
+      title: t.title || "Untitled Goal",
+      description: t.description || "Generated via Brain Dump.",
+      deadline: deadlineDate,
+      estimatedHours: hours,
+      progress: 0,
+      status: 'not_started',
+      category: t.category || "Tech",
+      priority: (t.priority === 'high' || t.priority === 'low' || t.priority === 'medium') ? t.priority : 'medium',
+      difficulty: (t.difficulty === 'High' || t.difficulty === 'Low' || t.difficulty === 'Medium') ? t.difficulty : 'Medium',
+      risk: riskScore,
+      recommendedStart: fallbackDays <= 2 ? "Today" : "Tomorrow",
+      createdAt: new Date().toISOString()
+    };
+
+    finalTasks.push(newTask);
+  });
+
+  // Process Focus Sessions to Events
+  extracted.focusSessions.forEach((session: any, idx: number) => {
+    const realTaskId = tempIdToRealIdMap.get(session.taskTempId);
+    if (!realTaskId) return;
+
+    const { start, end } = computeSessionStartAndEnd(
+      session.day,
+      session.timeSlot,
+      session.duration,
+      localTime || new Date().toString(),
+      new Date().toISOString()
+    );
+
+    const newEvent: CalendarEvent = {
+      id: `cal-focus-${Date.now()}-${idx}`,
+      title: `🎯 Focus: ${session.phase}`,
+      start,
+      end,
+      isFocusSession: true,
+      taskId: realTaskId
+    };
+
+    finalEvents.push(newEvent);
+  });
+
+  if (!isStateless && store) {
+    finalTasks.forEach(t => store.tasks.push(t));
+    finalEvents.forEach(e => store.calendarEvents.push(e));
+
+    store.notifications.push({
+      id: "not-" + Date.now(),
+      type: "success",
+      message: `Brain Dump processed. Imported ${finalTasks.length} tasks and ${finalEvents.length} calendar focus windows.`,
+      timestamp: new Date().toISOString(),
+      read: false
+    });
+    writeData(store);
+  }
+
+  res.json({ tasks: finalTasks, events: finalEvents });
+});
+
+// Meeting overrun endpoint - reschedules focus sessions when a meeting runs over
+app.post('/api/ai/meeting-overrun', (req, res) => {
+  const { eventId, overrunMinutes, localTime, tasks: reqTasks, calendarEvents: reqEvents } = req.body;
+  const isStateless = Array.isArray(reqTasks);
+  const store = isStateless ? null : getData();
+  const currentEvents = isStateless ? reqEvents : store.calendarEvents;
+  const currentTasks = isStateless ? reqTasks : store.tasks;
+
+  const meetingIndex = currentEvents.findIndex((e: any) => e.id === eventId);
+  if (meetingIndex === -1) {
+    return res.status(404).json({ error: "Meeting not found" });
+  }
+
+  const meeting = currentEvents[meetingIndex];
+  const oldEnd = new Date(meeting.end);
+  const newEnd = new Date(oldEnd.getTime() + overrunMinutes * 60 * 1000);
+  meeting.end = newEnd.toISOString();
+
+  const shiftedSessionTitles: string[] = [];
+  let modifiedEvents = [...currentEvents];
+  
+  let hasConflicts = true;
+  let iterations = 0;
+  
+  while (hasConflicts && iterations < 10) {
+    hasConflicts = false;
+    iterations++;
+
+    for (let i = 0; i < modifiedEvents.length; i++) {
+      const evt = modifiedEvents[i];
+      if (!evt.isFocusSession) continue;
+
+      const fStart = new Date(evt.start);
+      const fEnd = new Date(evt.end);
+      const fDurationMs = fEnd.getTime() - fStart.getTime();
+
+      for (let j = 0; j < modifiedEvents.length; j++) {
+        const other = modifiedEvents[j];
+        if (evt.id === other.id) continue;
+
+        const oStart = new Date(other.start);
+        const oEnd = new Date(other.end);
+
+        if (fStart < oEnd && fEnd > oStart) {
+          if (!other.isFocusSession || oStart < fStart) {
+            const newStart = new Date(oEnd.getTime() + 5 * 60 * 1000);
+            evt.start = newStart.toISOString();
+            evt.end = new Date(newStart.getTime() + fDurationMs).toISOString();
+            hasConflicts = true;
+            if (!shiftedSessionTitles.includes(evt.title)) {
+              shiftedSessionTitles.push(evt.title);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const notifMessage = shiftedSessionTitles.length > 0
+    ? `🚨 Meeting overrun: "${meeting.title}" pushed by ${overrunMinutes}m. Automatically rescheduled focus windows: ${shiftedSessionTitles.join(", ")}.`
+    : `⏱️ Meeting "${meeting.title}" extended by ${overrunMinutes}m. No focus sessions were impacted.`;
+
+  const newNotif = {
+    id: "not-" + Date.now(),
+    type: "warning" as const,
+    message: notifMessage,
+    timestamp: new Date().toISOString(),
+    read: false
+  };
+
+  let newRescueMode = !isStateless && store ? store.rescueMode : false;
+  if (!isStateless && store) {
+    store.calendarEvents = modifiedEvents;
+    store.notifications.push(newNotif);
+    
+    if (shiftedSessionTitles.length > 0 && !store.rescueMode) {
+      store.rescueMode = true;
+      newRescueMode = true;
+      store.notifications.push({
+        id: "rescue-" + Date.now(),
+        type: "rescue",
+        message: `🚨 Emergency Rescue Mode activated! Timeline compressed due to meeting overrun.`,
+        timestamp: new Date().toISOString(),
+        read: false
+      });
+    }
+    writeData(store);
+  }
+
+  res.json({
+    success: true,
+    events: modifiedEvents,
+    notification: newNotif,
+    rescueMode: newRescueMode
+  });
+});
+
+// Recommend task endpoint - returns user's top-priority action item
+app.post('/api/ai/recommend-action', async (req, res) => {
+  const { tasks: reqTasks, calendarEvents: reqEvents } = req.body;
+  const isStateless = Array.isArray(reqTasks);
+  const store = isStateless ? null : getData();
+  const currentTasks = isStateless ? reqTasks : store.tasks;
+
+  const pendingTasks = currentTasks.filter((t: Task) => t.status !== 'completed');
+
+  if (pendingTasks.length === 0) {
+    return res.json({
+      recommended: false,
+      message: "All monitored goals are completed! Type or click 'Add Goal' to create a new challenge."
+    });
+  }
+
+  const sortedTasks = [...pendingTasks].sort((a, b) => {
+    if (a.priority === 'high' && b.priority !== 'high') return -1;
+    if (b.priority === 'high' && a.priority !== 'high') return 1;
+    return b.risk - a.risk;
+  });
+
+  const topTask = sortedTasks[0];
+
+  const aiClient = getGeminiClient();
+  let reason = `This goal has a ${topTask.risk}% risk score based on remaining work estimates vs deadline. Start now to stay on schedule.`;
+
+  if (aiClient) {
+    try {
+      const prompt = `You are the Deadline Guardian AI Chief of Staff.
+Analyze the user's top priority task and formulate a punchy, ultra-motivating 2-sentence rationale telling the user exactly why they MUST work on this task right now.
+
+Task details:
+- Title: "${topTask.title}"
+- Description: "${topTask.description}"
+- Estimated hours: ${topTask.estimatedHours}
+- Progress: ${topTask.progress}%
+- Deadline: ${topTask.deadline}
+- Risk Level: ${topTask.risk}%
+
+Keep the tone action-oriented, professional, and slightly intense. Do not use markdown inside the sentences.`;
+
+      const response = await generateContentWithFallback(aiClient, {
+        model: 'gemini-3.5-flash',
+        contents: prompt,
+      });
+      reason = response.text?.trim() || reason;
+    } catch (e) {
+      console.error("Gemini recommendation reasoning failed, using fallback:", e);
+    }
+  }
+
+  res.json({
+    recommended: true,
+    task: topTask,
+    reason: reason
+  });
+});
+
 // Generate execution plan based on task + calendar events
 app.post('/api/ai/plan', async (req, res) => {
   const { taskId, tasks, calendarEvents, localTime } = req.body;
