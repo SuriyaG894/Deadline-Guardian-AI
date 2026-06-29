@@ -152,3 +152,44 @@ export async function toggleRescueMode(): Promise<{ rescueMode: boolean; notific
   const res = await fetch('/api/ai/rescue/toggle', { method: 'POST' });
   return res.json();
 }
+
+export async function importBrainDump(
+  text: string, 
+  localTime: string, 
+  tasks?: Task[], 
+  calendarEvents?: CalendarEvent[]
+): Promise<{ tasks: Task[]; events: CalendarEvent[] }> {
+  const res = await fetch('/api/ai/braindump', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, localTime, tasks, calendarEvents })
+  });
+  return res.json();
+}
+
+export async function triggerMeetingOverrun(
+  eventId: string, 
+  overrunMinutes: number, 
+  localTime: string, 
+  tasks?: Task[], 
+  calendarEvents?: CalendarEvent[]
+): Promise<{ success: boolean; events: CalendarEvent[]; notification: SystemNotification; rescueMode: boolean }> {
+  const res = await fetch('/api/ai/meeting-overrun', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eventId, overrunMinutes, localTime, tasks, calendarEvents })
+  });
+  return res.json();
+}
+
+export async function getRecommendedAction(
+  tasks: Task[], 
+  calendarEvents: CalendarEvent[]
+): Promise<{ recommended: boolean; task?: Task; reason?: string; message?: string }> {
+  const res = await fetch('/api/ai/recommend-action', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tasks, calendarEvents })
+  });
+  return res.json();
+}

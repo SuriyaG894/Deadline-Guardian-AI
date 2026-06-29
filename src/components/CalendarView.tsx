@@ -17,9 +17,10 @@ interface CalendarViewProps {
   error?: { message: string; details?: string; apiDisabled?: boolean } | null;
   onClearError?: () => void;
   onRefresh?: () => void;
+  onMeetingOverrun?: (eventId: string, minutes: number) => void;
 }
 
-export default function CalendarView({ events, tasks, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError, onRefresh }: CalendarViewProps) {
+export default function CalendarView({ events, tasks, isConnected, onToggleConnect, onTriggerCheckin, error, onClearError, onRefresh, onMeetingOverrun }: CalendarViewProps) {
   // Sort events chronologically
   const sortedEvents = [...events].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
 
@@ -187,6 +188,25 @@ export default function CalendarView({ events, tasks, isConnected, onToggleConne
                           </button>
                         );
                       })()}
+
+                      {!evt.isFocusSession && onMeetingOverrun && (
+                        <div className="shrink-0 flex items-center gap-1 opacity-60 hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => onMeetingOverrun(evt.id, 30)}
+                            className="px-2 py-1 bg-zinc-800 hover:bg-red-950/40 border border-zinc-700 hover:border-red-900/50 text-zinc-300 hover:text-red-400 rounded-lg text-[9px] font-mono font-bold uppercase transition duration-150 cursor-pointer"
+                            title="Extend meeting by 30 mins"
+                          >
+                            +30m
+                          </button>
+                          <button
+                            onClick={() => onMeetingOverrun(evt.id, 60)}
+                            className="px-2 py-1 bg-zinc-800 hover:bg-red-950/40 border border-zinc-700 hover:border-red-900/50 text-zinc-300 hover:text-red-400 rounded-lg text-[9px] font-mono font-bold uppercase transition duration-150 cursor-pointer"
+                            title="Extend meeting by 60 mins"
+                          >
+                            +60m
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </motion.div>
                 );

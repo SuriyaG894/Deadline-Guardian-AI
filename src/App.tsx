@@ -14,7 +14,8 @@ import {
 import {
   fetchTasks, updateTask, deleteTask, fetchCalendarEvents,
   toggleCalendarConnection, generateExecutionPlan, fetchAnalytics,
-  fetchNotifications, markNotificationsRead, toggleRescueMode
+  fetchNotifications, markNotificationsRead, toggleRescueMode,
+  importBrainDump, triggerMeetingOverrun, getRecommendedAction
 } from './api';
 import { Task, CalendarEvent, ExecutionPlan, SystemNotification, Analytics } from './types';
 import VoiceAndChat from './components/VoiceAndChat';
@@ -24,6 +25,7 @@ import ExecutionPlanView from './components/ExecutionPlanView';
 import CheckInModal from './components/CheckInModal';
 import AuthPage from './components/AuthPage';
 import HelpTour from './components/HelpTour';
+import BrainDumpModal from './components/BrainDumpModal';
 import {
   auth,
   getUserMetadata,
@@ -72,9 +74,40 @@ export default function App() {
   // Refresh data trigger
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  // Brain Dump and Cognitive Recommendation states
+  const [showBrainDump, setShowBrainDump] = useState(false);
+  const [recommendedTask, setRecommendedTask] = useState<Task | null>(null);
+  const [recommendReason, setRecommendReason] = useState<string>('');
+  const [isLoadingRecommendation, setIsLoadingRecommendation] = useState(false);
+  const [showRecommendation, setShowRecommendation] = useState(false);
+  const [activeFocusTimer, setActiveFocusTimer] = useState<{
+    taskId: string;
+    taskTitle: string;
+    secondsLeft: number;
+    totalSeconds: number;
+    isRunning: boolean;
+  } | null>(null);
+
   const refreshAllData = () => {
     setRefreshTrigger(prev => prev + 1);
   };
+
+  // Timer Effect for Focus Session Countdown
+  useEffect(() => {
+    if (!activeFocusTimer || !activeFocusTimer.isRunning) return;
+    const interval = setInterval(() => {
+      setActiveFocusTimer(prev => {
+        if (!prev) return null;
+        if (prev.secondsLeft <= 1) {
+          clearInterval(interval);
+          handleTriggerCheckIn(prev.taskId, `⚡ Session Completed: ${prev.taskTitle}`);
+          return null;
+        }
+        return { ...prev, secondsLeft: prev.secondsLeft - 1 };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeFocusTimer]);
 
   // Request Notification Permissions on Startup
   useEffect(() => {
@@ -629,6 +662,70 @@ export default function App() {
     }
   };
 
+  const handleGetRecommendation = async () => {
+    setIsLoadingRecommendation(true);
+    try {
+      const result = await getRecommendedAction(tasks, events);
+      if (result.recommended && result.task) {
+        setRecommendedTask(result.task);
+        setRecommendReason(result.reason || "This is your highest priority task.");
+        setShowRecommendation(true);
+      } else {
+        alert(result.message || "No tasks available. Add some goals first!");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Failed to get priority recommendation.");
+    } finally {
+      setIsLoadingRecommendation(false);
+    }
+  };
+
+  const handleStartFocusSession = async (task: Task) => {
+    if (!user) return;
+    try {
+      const updatedTask = {
+        ...task,
+        status: 'in_progress' as const
+      };
+      await saveUserTask(user.uid, task.id, updatedTask);
+
+      setActiveFocusTimer({
+        taskId: task.id,
+        taskTitle: task.title,
+        secondsLeft: 25 * 60,
+        totalSeconds: 25 * 60,
+        isRunning: true
+      });
+
+      setShowRecommendation(false);
+      refreshAllData();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleMeetingOverrun = async (eventId: string, minutes: number) => {
+    if (!user) return;
+    try {
+      const result = await triggerMeetingOverrun(eventId, minutes, new Date().toString(), tasks, events);
+      if (result.success) {
+        for (const ev of result.events) {
+          await saveUserEvent(user.uid, ev.id, ev);
+        }
+        if (result.notification) {
+          await saveUserNotification(user.uid, result.notification.id, result.notification);
+        }
+        if (result.rescueMode) {
+          await saveUserMetadata(user.uid, { rescueMode: true });
+        }
+        refreshAllData();
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleClearNotifications = async () => {
     if (!user) return;
     try {
@@ -892,39 +989,131 @@ export default function App() {
             </div>
           </div>
 
-          {/* Productivity Score Bento Card */}
-          <div id="help-productivity-metrics" className="p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between">
+          {/* Cognitive Decision Hub Bento Card */}
+          <div className="md:col-span-2 p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between relative overflow-hidden group min-h-[180px]">
             <div className="flex justify-between items-start">
-              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Productivity Index</h3>
-              <TrendingUp className="w-4 h-4 text-red-500" />
-            </div>
-            <div className="py-2">
-              <div className="text-4xl font-semibold tracking-tight text-white">
-                {analytics ? analytics.productivityScore : 100}%
+              <div className="flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-red-500 animate-pulse" />
+                <h3 className="text-xs font-bold text-zinc-300 uppercase tracking-widest">Cognitive Decision Hub</h3>
               </div>
-              <div className="text-[10px] text-zinc-400 mt-1 uppercase font-mono tracking-wider">Optimized Capacity</div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowBrainDump(true)}
+                  className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/60 border border-red-900/40 hover:border-red-500 rounded-lg text-[10px] font-mono font-bold text-red-400 hover:text-white transition duration-150 cursor-pointer"
+                >
+                  ⚡ BRAIN DUMP
+                </button>
+              </div>
             </div>
-            <div className="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-              <div
-                className="bg-red-600 h-full transition-all duration-500"
-                style={{ width: `${analytics ? analytics.productivityScore : 100}%` }}
-              />
-            </div>
-          </div>
 
-          {/* Focus hours Bento Card */}
-          <div className="p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between">
-            <div className="flex justify-between items-start">
-              <h3 className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Focus Time Logged</h3>
-              <BarChart2 className="w-4 h-4 text-red-500" />
-            </div>
-            <div className="py-2">
-              <div className="text-4xl font-semibold tracking-tight text-white">
-                {analytics ? analytics.focusHoursLogged : 0}h
+            {activeFocusTimer ? (
+              /* Timer HUD */
+              <div className="py-2 flex items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <span className="text-[9px] font-mono uppercase bg-red-950/40 text-red-400 px-2 py-0.5 rounded-md border border-red-900/30 animate-pulse">
+                    ACTIVE FOCUS SESSION
+                  </span>
+                  <h4 className="text-xs font-bold text-white truncate max-w-[200px]" title={activeFocusTimer.taskTitle}>
+                    {activeFocusTimer.taskTitle}
+                  </h4>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <div className="text-2xl font-mono font-bold text-red-500 tracking-wider">
+                      {Math.floor(activeFocusTimer.secondsLeft / 60)}:
+                      {String(activeFocusTimer.secondsLeft % 60).padStart(2, '0')}
+                    </div>
+                    <div className="text-[8px] text-zinc-500 font-mono uppercase">Remaining</div>
+                  </div>
+                  <div className="flex gap-1.5">
+                    <button
+                      onClick={() => {
+                        setActiveFocusTimer(prev => prev ? { ...prev, isRunning: !prev.isRunning } : null);
+                      }}
+                      className="px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-[10px] font-bold uppercase transition duration-150 cursor-pointer"
+                    >
+                      {activeFocusTimer.isRunning ? "PAUSE" : "RESUME"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const timer = activeFocusTimer;
+                        setActiveFocusTimer(null);
+                        handleTriggerCheckIn(timer.taskId, timer.taskTitle);
+                      }}
+                      className="px-2.5 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-[10px] font-bold uppercase transition duration-150 cursor-pointer shadow-[0_0_12px_rgba(220,38,38,0.3)]"
+                    >
+                      CHECK-IN
+                    </button>
+                  </div>
+                </div>
               </div>
-              <div className="text-[10px] text-zinc-400 mt-1 uppercase font-mono tracking-wider">This Week</div>
+            ) : (
+              /* Action Recommender dashboard UI */
+              <div className="py-2 space-y-3">
+                {showRecommendation && recommendedTask ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-zinc-950/40 border border-red-950/40 rounded-2xl p-3 space-y-2"
+                  >
+                    <div className="flex justify-between items-start">
+                      <span className="text-[9px] font-mono bg-red-950/40 border border-red-900/50 text-red-400 px-1.5 py-0.5 rounded">
+                        RECOMMENDED GOAL
+                      </span>
+                      <span className="text-[9px] font-mono text-zinc-500">
+                        Risk: {recommendedTask.risk}%
+                      </span>
+                    </div>
+                    <h4 className="text-xs font-bold text-white">{recommendedTask.title}</h4>
+                    <p className="text-[10px] text-zinc-400 leading-relaxed font-sans">{recommendReason}</p>
+                    
+                    <div className="flex gap-2 justify-end pt-1">
+                      <button
+                        onClick={() => setShowRecommendation(false)}
+                        className="px-2.5 py-1 border border-[#262626] hover:bg-zinc-900 text-zinc-500 hover:text-zinc-300 rounded-lg text-[9px] font-bold uppercase transition duration-150 cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={() => handleStartFocusSession(recommendedTask)}
+                        className="px-3 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[9px] font-bold uppercase transition duration-150 cursor-pointer shadow-[0_0_10px_rgba(220,38,38,0.3)]"
+                      >
+                        Start focus block (25m)
+                      </button>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-2 space-y-2">
+                    <button
+                      onClick={handleGetRecommendation}
+                      disabled={isLoadingRecommendation}
+                      className="w-full py-3 bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-[0_0_20px_rgba(220,38,38,0.35)] hover:shadow-[0_0_25px_rgba(220,38,38,0.5)] transition duration-200 cursor-pointer text-center"
+                    >
+                      {isLoadingRecommendation ? (
+                        <>
+                          <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Analyzing timelines...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          What should I do right now?
+                        </>
+                      )}
+                    </button>
+                    <p className="text-[9px] text-zinc-500 text-center font-mono">
+                      Instant priority evaluator. Resolves decision-paralysis.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Mini analytics summary to preserve visuals */}
+            <div className="flex items-center justify-between text-[9px] font-mono text-zinc-500 border-t border-[#262626] pt-2">
+              <span>Productivity Index: {analytics ? analytics.productivityScore : 100}%</span>
+              <span>Focus Hours: {analytics ? analytics.focusHoursLogged : 0}h</span>
             </div>
-            <p className="text-[10px] text-zinc-500 leading-none">Mapped safely around calendar conflicts</p>
           </div>
         </div>
 
@@ -1100,6 +1289,7 @@ export default function App() {
               error={calendarError}
               onClearError={() => setCalendarError(null)}
               onRefresh={refreshAllData}
+              onMeetingOverrun={handleMeetingOverrun}
             />
           </div>
 
@@ -1160,6 +1350,19 @@ export default function App() {
                 }
               }
             }}
+          />
+        )}
+
+        {showBrainDump && (
+          <BrainDumpModal
+            isOpen={showBrainDump}
+            onClose={() => setShowBrainDump(false)}
+            onImportCompleted={() => {
+              setShowBrainDump(false);
+              refreshAllData();
+            }}
+            tasks={tasks}
+            calendarEvents={events}
           />
         )}
       </AnimatePresence>
