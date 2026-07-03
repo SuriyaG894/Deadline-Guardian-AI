@@ -195,11 +195,28 @@ export default function HelpTour({ isOpen, onComplete }: HelpTourProps) {
     const offset = 20;
     let placement = activeStep.placement;
 
-    // Flip placement dynamically if target leaves insufficient viewport space above/below
+    // Flip horizontal placement dynamically if target leaves insufficient viewport space
+    if (placement === 'left' && rect.left < 380 + offset + 16) {
+      placement = 'right';
+    } else if (placement === 'right' && (windowWidth - (rect.left + rect.width)) < 380 + offset + 16) {
+      placement = 'left';
+    }
+
+    // Flip vertical placement dynamically if target leaves insufficient viewport space above/below
     if (placement === 'top' && rect.top < 240) {
       placement = 'bottom';
     } else if (placement === 'bottom' && (window.innerHeight - (rect.top + rect.height)) < 240) {
       placement = 'top';
+    }
+
+    // Clamp horizontal position so tooltip card never overflows screen edges
+    const tooltipWidth = 380;
+    const padding = 16;
+    const minLeft = (tooltipWidth / 2) + padding; // 206
+    const maxLeft = windowWidth - (tooltipWidth / 2) - padding;
+    let leftVal = rect.left + rect.width / 2;
+    if (minLeft < maxLeft) {
+      leftVal = Math.max(minLeft, Math.min(maxLeft, leftVal));
     }
 
     switch (placement) {
@@ -207,7 +224,7 @@ export default function HelpTour({ isOpen, onComplete }: HelpTourProps) {
         return {
           position: 'fixed' as const,
           top: `${rect.top + rect.height + offset}px`,
-          left: `${rect.left + rect.width / 2}px`,
+          left: `${leftVal}px`,
           transform: 'translateX(-50%)',
           zIndex: 50,
           width: '100%',
@@ -217,7 +234,7 @@ export default function HelpTour({ isOpen, onComplete }: HelpTourProps) {
         return {
           position: 'fixed' as const,
           top: `${rect.top - offset}px`,
-          left: `${rect.left + rect.width / 2}px`,
+          left: `${leftVal}px`,
           transform: 'translate(-50%, -100%)',
           zIndex: 50,
           width: '100%',
