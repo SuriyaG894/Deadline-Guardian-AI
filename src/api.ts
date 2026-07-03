@@ -5,69 +5,89 @@
 
 import { Task, CalendarEvent, ExecutionPlan, ProgressLog, SystemNotification, Analytics } from './types';
 
+// Centralized fetch helper that injects x-gemini-api-key header and handles non-OK responses
+async function apiFetch(url: string, options: RequestInit = {}, geminiApiKey?: string) {
+  const headers = new Headers(options.headers || {});
+  if (!headers.has('Content-Type') && options.method && options.method !== 'GET') {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (geminiApiKey) {
+    headers.set('x-gemini-api-key', geminiApiKey);
+  }
+  
+  const response = await fetch(url, {
+    ...options,
+    headers
+  });
+  
+  const data = await response.json().catch(() => ({}));
+  
+  if (!response.ok) {
+    const errorMsg = data.error?.userMessage || data.error?.message || 'API request failed';
+    const errObj = new Error(errorMsg) as any;
+    errObj.status = response.status;
+    errObj.error = data.error;
+    throw errObj;
+  }
+  
+  return data;
+}
+
+export async function testGeminiApiKey(apiKey: string): Promise<boolean> {
+  await apiFetch('/api/ai/test-key', { method: 'POST' }, apiKey);
+  return true;
+}
+
 export async function login() {
-  const res = await fetch('/api/login', { method: 'POST' });
-  return res.json();
+  return apiFetch('/api/login', { method: 'POST' });
 }
 
 export async function logout() {
-  const res = await fetch('/api/logout', { method: 'POST' });
-  return res.json();
+  return apiFetch('/api/logout', { method: 'POST' });
 }
 
 export async function fetchTasks(): Promise<Task[]> {
-  const res = await fetch('/api/tasks');
-  return res.json();
+  return apiFetch('/api/tasks');
 }
 
-export async function createTask(taskData: Partial<Task>): Promise<Task> {
-  const res = await fetch('/api/tasks', {
+export async function createTask(taskData: Partial<Task>, geminiApiKey?: string): Promise<Task> {
+  return apiFetch('/api/tasks', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(taskData)
-  });
-  return res.json();
+  }, geminiApiKey);
 }
 
 export async function updateTask(id: string, updates: Partial<Task> & { comment?: string }): Promise<Task> {
-  const res = await fetch(`/api/tasks/${id}`, {
+  return apiFetch(`/api/tasks/${id}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(updates)
   });
-  return res.json();
 }
 
 export async function deleteTask(id: string): Promise<{ success: boolean }> {
-  const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-  return res.json();
+  return apiFetch(`/api/tasks/${id}`, { method: 'DELETE' });
 }
 
 export async function fetchCalendarEvents(accessToken?: string): Promise<{ connected: boolean; events?: CalendarEvent[]; error?: string; apiDisabled?: boolean; details?: string }> {
-  const headers: HeadersInit = {};
+  const headers: Record<string, string> = {};
   if (accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`;
   }
-  const res = await fetch('/api/calendar/events', { headers });
-  return res.json();
+  return apiFetch('/api/calendar/events', { headers });
 }
 
 export async function toggleCalendarConnection(accessToken?: string): Promise<{ connected: boolean; events?: CalendarEvent[]; error?: string; apiDisabled?: boolean; details?: string }> {
-  const res = await fetch('/api/calendar/connect', {
+  return apiFetch('/api/calendar/connect', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ accessToken })
   });
-  return res.json();
 }
 
-export async function generateExecutionPlan(taskId: string, tasks?: Task[], calendarEvents?: CalendarEvent[], localTime?: string): Promise<ExecutionPlan> {
-  const res = await fetch('/api/ai/plan', {
+export async function generateExecutionPlan(taskId: string, tasks?: Task[], calendarEvents?: CalendarEvent[], localTime?: string, geminiApiKey?: string): Promise<ExecutionPlan> {
+  return apiFetch('/api/ai/plan', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ taskId, tasks, calendarEvents, localTime })
-  });
-  return res.json();
+  }, geminiApiKey);
 }
 
 export async function approveExecutionPlan(
@@ -75,12 +95,10 @@ export async function approveExecutionPlan(
   executionPlans?: ExecutionPlan[], 
   calendarEvents?: CalendarEvent[]
 ): Promise<{ success: boolean; plan: ExecutionPlan; newEvents?: CalendarEvent[] }> {
-  const res = await fetch('/api/ai/plan/approve', {
+  return apiFetch('/api/ai/plan/approve', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ planId, executionPlans, calendarEvents })
   });
-  return res.json();
 }
 
 export async function checkInSession(data: {
@@ -90,13 +108,11 @@ export async function checkInSession(data: {
   textFeedback?: string;
   tasks?: Task[];
   rescueMode?: boolean;
-}): Promise<{ task: Task; coachingAdvice: string; rescueMode: boolean; newLog?: any; newNotification?: any }> {
-  const res = await fetch('/api/ai/checkin', {
+}, geminiApiKey?: string): Promise<{ task: Task; coachingAdvice: string; rescueMode: boolean; newLog?: any; newNotification?: any }> {
+  return apiFetch('/api/ai/checkin', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data)
-  });
-  return res.json();
+  }, geminiApiKey);
 }
 
 export interface ChatResponse {
@@ -118,53 +134,46 @@ export async function sendChatMessage(
   context?: any, 
   tasks?: Task[], 
   calendarEvents?: CalendarEvent[], 
-  rescueMode?: boolean
+  rescueMode?: boolean,
+  geminiApiKey?: string
 ): Promise<ChatResponse> {
-  const res = await fetch('/api/ai/chat', {
+  return apiFetch('/api/ai/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, context, tasks, calendarEvents, rescueMode })
-  });
-  return res.json();
+  }, geminiApiKey);
 }
 
 export async function fetchAnalytics(tasks?: Task[], calendarEvents?: CalendarEvent[]): Promise<Analytics> {
   const isPost = Array.isArray(tasks);
-  const res = await fetch('/api/analytics', {
+  return apiFetch('/api/analytics', {
     method: isPost ? 'POST' : 'GET',
-    headers: isPost ? { 'Content-Type': 'application/json' } : undefined,
     body: isPost ? JSON.stringify({ tasks, calendarEvents }) : undefined
   });
-  return res.json();
 }
 
 export async function fetchNotifications(): Promise<SystemNotification[]> {
-  const res = await fetch('/api/notifications');
-  return res.json();
+  return apiFetch('/api/notifications');
 }
 
 export async function markNotificationsRead(): Promise<SystemNotification[]> {
-  const res = await fetch('/api/notifications/read', { method: 'POST' });
-  return res.json();
+  return apiFetch('/api/notifications/read', { method: 'POST' });
 }
 
 export async function toggleRescueMode(): Promise<{ rescueMode: boolean; notifications: SystemNotification[] }> {
-  const res = await fetch('/api/ai/rescue/toggle', { method: 'POST' });
-  return res.json();
+  return apiFetch('/api/ai/rescue/toggle', { method: 'POST' });
 }
 
 export async function importBrainDump(
   text: string, 
   localTime: string, 
   tasks?: Task[], 
-  calendarEvents?: CalendarEvent[]
+  calendarEvents?: CalendarEvent[],
+  geminiApiKey?: string
 ): Promise<{ tasks: Task[]; events: CalendarEvent[] }> {
-  const res = await fetch('/api/ai/braindump', {
+  return apiFetch('/api/ai/braindump', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text, localTime, tasks, calendarEvents })
-  });
-  return res.json();
+  }, geminiApiKey);
 }
 
 export async function triggerMeetingOverrun(
@@ -174,22 +183,19 @@ export async function triggerMeetingOverrun(
   tasks?: Task[], 
   calendarEvents?: CalendarEvent[]
 ): Promise<{ success: boolean; events: CalendarEvent[]; notification: SystemNotification; rescueMode: boolean }> {
-  const res = await fetch('/api/ai/meeting-overrun', {
+  return apiFetch('/api/ai/meeting-overrun', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ eventId, overrunMinutes, localTime, tasks, calendarEvents })
   });
-  return res.json();
 }
 
 export async function getRecommendedAction(
   tasks: Task[], 
-  calendarEvents: CalendarEvent[]
+  calendarEvents: CalendarEvent[],
+  geminiApiKey?: string
 ): Promise<{ recommended: boolean; task?: Task; reason?: string; message?: string }> {
-  const res = await fetch('/api/ai/recommend-action', {
+  return apiFetch('/api/ai/recommend-action', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ tasks, calendarEvents })
-  });
-  return res.json();
+  }, geminiApiKey);
 }

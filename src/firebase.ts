@@ -112,6 +112,7 @@ export interface UserMetadata {
   googleAccessToken?: string | null;
   bombFrequency?: number;
   hasCompletedTour?: boolean;
+  geminiApiKey?: string | null;
 }
 
 // 1. User Profile Document Schema

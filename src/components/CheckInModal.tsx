@@ -19,6 +19,7 @@ interface CheckInModalProps {
   tasks?: Task[];
   rescueMode?: boolean;
   eventId?: string;
+  geminiApiKey?: string;
 }
 
 export default function CheckInModal({ 
@@ -29,7 +30,8 @@ export default function CheckInModal({
   onCheckInCompleted,
   tasks,
   rescueMode,
-  eventId
+  eventId,
+  geminiApiKey
 }: CheckInModalProps) {
   const [status, setStatus] = useState<'completed' | 'partially_completed' | 'failed' | null>(null);
   const [textFeedback, setTextFeedback] = useState('');
@@ -53,7 +55,7 @@ export default function CheckInModal({
         textFeedback,
         tasks,
         rescueMode
-      });
+      }, geminiApiKey);
 
       if (currentUser) {
         // Save to Firestore
