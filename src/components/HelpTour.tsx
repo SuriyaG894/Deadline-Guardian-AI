@@ -123,15 +123,9 @@ export default function HelpTour({ isOpen, onComplete }: HelpTourProps) {
     const updateRect = () => {
       const el = document.querySelector(step.selector!);
       if (el) {
-        // Optimize scrolling alignment based on placement to maximize space for the tooltip
-        const placement = step.placement;
-        let blockAlign: ScrollIntoViewOptions['block'] = 'center';
-        if (placement === 'top') {
-          blockAlign = 'end';
-        } else if (placement === 'bottom') {
-          blockAlign = 'start';
-        }
-
+        // Scroll the element to the center of the viewport.
+        // We use 'center' to keep the focused element in view and avoid scrolling it under the sticky header.
+        const blockAlign: ScrollIntoViewOptions['block'] = 'center';
         el.scrollIntoView({ behavior: 'smooth', block: blockAlign });
         
         // Wait briefly for scroll to settle, then capture rect relative to viewport

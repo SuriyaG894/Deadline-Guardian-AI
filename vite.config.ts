@@ -19,7 +19,7 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {
         ignored: ['**/data-store.json']
       },
-      proxy: {
+      proxy: process.env.VITE_MIDDLEWARE === 'true' ? undefined : {
         '/api': {
           target: 'http://localhost:3000',
           changeOrigin: true,

@@ -20,7 +20,7 @@ app.use(express.json());
 
 // Normalize Vercel pathing (Vercel strips "/api" prefix for serverless functions placed in /api)
 app.use((req, res, next) => {
-  if (req.url && !req.url.startsWith('/api')) {
+  if (process.env.VERCEL && req.url && !req.url.startsWith('/api')) {
     req.url = '/api' + req.url;
   }
   next();
@@ -2231,6 +2231,7 @@ async function startServer() {
   initializeDataStore();
 
   if (process.env.NODE_ENV !== "production") {
+    process.env.VITE_MIDDLEWARE = "true";
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
