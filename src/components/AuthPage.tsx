@@ -72,13 +72,6 @@ export default function AuthPage() {
 
       if (currentUser) {
         await seedUserData(currentUser.uid, currentUser.email || "", currentUser.displayName || "User");
-        if (token) {
-          // Save Google token in user metadata
-          await saveUserMetadata(currentUser.uid, {
-            calendarConnected: true,
-            googleAccessToken: token
-          });
-        }
       }
     } catch (err: any) {
       console.error(err);
