@@ -1022,7 +1022,7 @@ export default function App() {
           </div>
 
           {/* Cognitive Decision Hub Bento Card */}
-          <div className="md:col-span-2 p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between relative overflow-hidden group min-h-[180px]">
+          <div id="help-productivity-metrics" className="md:col-span-2 p-6 bg-[#111114] border border-[#262626] rounded-3xl flex flex-col justify-between relative overflow-hidden group min-h-[180px]">
             <div className="flex justify-between items-start">
               <div className="flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4 text-red-500 animate-pulse" />
@@ -1030,6 +1030,7 @@ export default function App() {
               </div>
               <div className="flex gap-2">
                 <button
+                  id="brain-dump-trigger"
                   onClick={() => setShowBrainDump(true)}
                   className="px-2.5 py-1 bg-red-950/40 hover:bg-red-900/60 border border-red-900/40 hover:border-red-500 rounded-lg text-[10px] font-mono font-bold text-red-400 hover:text-white transition duration-150 cursor-pointer"
                 >
@@ -1117,6 +1118,7 @@ export default function App() {
                 ) : (
                   <div className="flex flex-col items-center justify-center py-2 space-y-2">
                     <button
+                      id="cognitive-recommendation-trigger"
                       onClick={handleGetRecommendation}
                       disabled={isLoadingRecommendation}
                       className="w-full py-3 bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-500 text-white rounded-2xl text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-1.5 shadow-[0_0_20px_rgba(220,38,38,0.35)] hover:shadow-[0_0_25px_rgba(220,38,38,0.5)] transition duration-200 cursor-pointer text-center"
