@@ -9,7 +9,7 @@ import {
   Bot, ShieldAlert, Sparkles, Plus, CheckCircle,
   Trash2, Layers, Calendar, AlertTriangle, ShieldCheck,
   HelpCircle, RefreshCw, BarChart2, Bell, CheckSquare,
-  TrendingUp, CircleAlert, HelpCircle as HelpIcon, LogOut
+  TrendingUp, CircleAlert, HelpCircle as HelpIcon, LogOut, Settings
 } from 'lucide-react';
 import {
   fetchTasks, updateTask, deleteTask, fetchCalendarEvents,
@@ -26,6 +26,7 @@ import CheckInModal from './components/CheckInModal';
 import AuthPage from './components/AuthPage';
 import HelpTour from './components/HelpTour';
 import BrainDumpModal from './components/BrainDumpModal';
+import SettingsModal from './components/SettingsModal';
 import {
   auth,
   getUserMetadata,
@@ -61,6 +62,10 @@ export default function App() {
   const [activePlan, setActivePlan] = useState<ExecutionPlan | null>(null);
   const [rescueMode, setRescueMode] = useState(false);
   const [calendarError, setCalendarError] = useState<{ message: string; details?: string; apiDisabled?: boolean } | null>(null);
+
+  const [geminiApiKey, setGeminiApiKey] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [planError, setPlanError] = useState<any | null>(null);
 
   // Form states
   const [showTaskForm, setShowTaskForm] = useState(false);
@@ -109,13 +114,15 @@ export default function App() {
     return () => clearInterval(interval);
   }, [activeFocusTimer]);
 
-  // Request Notification Permissions on Startup
+  // Listen for global request to open API settings modal
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission().then(permission => {
-        console.log('Notification permission status:', permission);
-      });
-    }
+    const handleOpenSettings = () => {
+      setShowSettings(true);
+    };
+    window.addEventListener('open-api-settings', handleOpenSettings);
+    return () => {
+      window.removeEventListener('open-api-settings', handleOpenSettings);
+    };
   }, []);
 
   // Helper to trigger native OS/mobile browser notification bar alerts
@@ -330,6 +337,7 @@ export default function App() {
         setRescueMode(!!metadata?.rescueMode);
         setBombFrequency(metadata?.bombFrequency || 5);
         setCalendarConnected(isConnected);
+        setGeminiApiKey(metadata?.geminiApiKey || null);
 
         // Auto trigger the briefing tour for users who haven't completed it yet
         if (metadata && !metadata.hasCompletedTour) {
@@ -592,6 +600,7 @@ export default function App() {
   const handleTriggerAIPlan = async (taskId: string) => {
     if (!user) return;
     setIsGeneratingPlan(true);
+    setPlanError(null);
     try {
       // Delete previous execution plans for this task
       const userPlans = await getUserPlans(user.uid);
@@ -609,12 +618,13 @@ export default function App() {
 
       // Generate execution plan excluding current task's own focus sessions from the conflict list
       const filteredEvents = events.filter(e => e.taskId !== taskId);
-      const plan = await generateExecutionPlan(taskId, tasks, filteredEvents, new Date().toString());
+      const plan = await generateExecutionPlan(taskId, tasks, filteredEvents, new Date().toString(), geminiApiKey || undefined);
       await saveUserPlan(user.uid, plan.id, plan);
       setActivePlan(plan);
       refreshAllData();
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setPlanError(e.error || { message: e.message || 'Failed to generate execution plan.' });
     } finally {
       setIsGeneratingPlan(false);
     }
@@ -662,10 +672,22 @@ export default function App() {
     }
   };
 
+  const handleSaveApiKey = async (key: string | null) => {
+    if (!user) return;
+    try {
+      setGeminiApiKey(key);
+      await saveUserMetadata(user.uid, { geminiApiKey: key });
+      refreshAllData();
+    } catch (err) {
+      console.error("Failed to save Gemini API key:", err);
+      throw err;
+    }
+  };
+
   const handleGetRecommendation = async () => {
     setIsLoadingRecommendation(true);
     try {
-      const result = await getRecommendedAction(tasks, events);
+      const result = await getRecommendedAction(tasks, events, geminiApiKey || undefined);
       if (result.recommended && result.task) {
         setRecommendedTask(result.task);
         setRecommendReason(result.reason || "This is your highest priority task.");
@@ -841,6 +863,16 @@ export default function App() {
               title="System Briefing Tour"
             >
               <HelpCircle className="w-4 h-4" />
+            </button>
+
+            {/* System Settings Trigger */}
+            <button
+              id="system-settings-trigger"
+              onClick={() => setShowSettings(true)}
+              className="p-2.5 bg-[#111114] hover:bg-[#1c1c21] border border-[#262626] rounded-xl text-zinc-400 hover:text-white transition duration-150 cursor-pointer relative"
+              title="System Settings"
+            >
+              <Settings className="w-4 h-4" />
             </button>
 
             {/* Notification Tray */}
@@ -1270,6 +1302,7 @@ export default function App() {
               tasks={tasks}
               calendarEvents={events}
               rescueMode={rescueMode}
+              geminiApiKey={geminiApiKey || undefined}
             />
           </div>
 
@@ -1298,6 +1331,7 @@ export default function App() {
             <ExecutionPlanView
               plan={activePlan}
               isGenerating={isGeneratingPlan}
+              planError={planError}
               onPlanApproved={refreshAllData}
               onRegenerate={() => {
                 if (activePlan) handleTriggerAIPlan(activePlan.taskId);
@@ -1320,6 +1354,7 @@ export default function App() {
             onClose={() => setCheckInTask(null)}
             tasks={tasks}
             rescueMode={rescueMode}
+            geminiApiKey={geminiApiKey || undefined}
             onCheckInCompleted={async () => {
               const taskId = checkInTask.id;
               const eventId = checkInTask.eventId;
@@ -1363,6 +1398,16 @@ export default function App() {
             }}
             tasks={tasks}
             calendarEvents={events}
+            geminiApiKey={geminiApiKey || undefined}
+          />
+        )}
+
+        {showSettings && (
+          <SettingsModal
+            isOpen={showSettings}
+            onClose={() => setShowSettings(false)}
+            currentApiKey={geminiApiKey}
+            onSave={handleSaveApiKey}
           />
         )}
       </AnimatePresence>

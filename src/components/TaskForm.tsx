@@ -12,9 +12,10 @@ import { auth, saveUserTask, saveUserNotification } from '../firebase';
 interface TaskFormProps {
   onTaskCreated: () => void;
   onCancel: () => void;
+  geminiApiKey?: string;
 }
 
-export default function TaskForm({ onTaskCreated, onCancel }: TaskFormProps) {
+export default function TaskForm({ onTaskCreated, onCancel, geminiApiKey }: TaskFormProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [deadline, setDeadline] = useState(
@@ -81,7 +82,7 @@ export default function TaskForm({ onTaskCreated, onCancel }: TaskFormProps) {
           estimatedHours: Number(estimatedHours) || 4,
           category,
           priority: priority as 'low' | 'medium' | 'high'
-        });
+        }, geminiApiKey);
       }
       onTaskCreated();
     } catch (err) {

@@ -25,6 +25,8 @@ interface Message {
   text: string;
   timestamp: string;
   intent?: string;
+  isApiError?: boolean;
+  errorType?: string;
 }
 
 interface VoiceAndChatProps {
@@ -33,6 +35,7 @@ interface VoiceAndChatProps {
   tasks?: Task[];
   calendarEvents?: CalendarEvent[];
   rescueMode?: boolean;
+  geminiApiKey?: string;
 }
 
 // Browser SpeechRecognition Type Declarations
@@ -63,7 +66,8 @@ export default function VoiceAndChat({
   activeTaskId,
   tasks,
   calendarEvents,
-  rescueMode
+  rescueMode,
+  geminiApiKey
 }: VoiceAndChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -165,7 +169,7 @@ export default function VoiceAndChat({
 
     try {
       const currentUser = auth.currentUser;
-      const response = await sendChatMessage(text, null, tasks, calendarEvents, rescueMode);
+      const response = await sendChatMessage(text, null, tasks, calendarEvents, rescueMode, geminiApiKey);
       
       const aiMsg: Message = {
         id: `msg-ai-${Date.now()}`,
@@ -224,11 +228,15 @@ export default function VoiceAndChat({
         errorText = "Database Permission Issue: Your custom Firebase project security rules are currently blocking writes. Please make sure to deploy the Firestore Security Rules for your project 'deadline-guardian-ai-894f', or use Demo Sandbox Mode from the top-right sign-out menu to bypass real-time DB limits instantly.";
       }
       
+      const isGeminiError = err?.error?.code === 'GEMINI_API_ERROR' || err?.message?.includes('Gemini API') || err?.message?.includes('API key');
+      
       const errorMsg: Message = {
         id: `msg-err-${Date.now()}`,
         sender: 'ai',
-        text: errorText,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        text: isGeminiError ? err.message : errorText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isApiError: isGeminiError,
+        errorType: err?.error?.type
       };
       setMessages(prev => [...prev, errorMsg]);
     } finally {
@@ -305,13 +313,35 @@ export default function VoiceAndChat({
               </div>
 
               <div className="space-y-1">
-                <div className={`px-3.5 py-2.5 rounded-xl text-sm leading-relaxed ${
-                  msg.sender === 'user'
-                    ? 'bg-indigo-600/90 text-white rounded-tr-none border border-indigo-500'
-                    : 'bg-slate-800/80 text-slate-200 rounded-tl-none border border-slate-700'
-                }`}>
-                  {msg.text}
-                </div>
+                {msg.isApiError ? (
+                  <div className="bg-red-950/20 border border-red-900/40 p-4 rounded-xl text-red-400 space-y-3 rounded-tl-none">
+                    <div className="flex items-start gap-2.5">
+                      <AlertCircle className="w-5 h-5 shrink-0 text-red-500 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-xs uppercase tracking-wide">Gemini API Connection Issue</p>
+                        <p className="text-xs text-red-300 mt-1 leading-relaxed font-sans">{msg.text}</p>
+                      </div>
+                    </div>
+                    {(msg.errorType === 'INVALID_KEY' || msg.errorType === 'QUOTA_EXCEEDED' || msg.text?.includes('key')) && (
+                      <button
+                        onClick={() => {
+                          window.dispatchEvent(new CustomEvent('open-api-settings'));
+                        }}
+                        className="px-3 py-1.5 bg-red-900/40 hover:bg-red-800/60 border border-red-800/50 rounded-lg text-[10px] font-mono font-bold text-white transition duration-150 uppercase cursor-pointer"
+                      >
+                        Configure API Key
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className={`px-3.5 py-2.5 rounded-xl text-sm leading-relaxed ${
+                    msg.sender === 'user'
+                      ? 'bg-indigo-600/90 text-white rounded-tr-none border border-indigo-500'
+                      : 'bg-slate-800/80 text-slate-200 rounded-tl-none border border-slate-700'
+                  }`}>
+                    {msg.text}
+                  </div>
+                )}
                 <div className={`text-[10px] font-mono text-slate-500 px-1 ${msg.sender === 'user' ? 'text-right' : ''}`}>
                   {msg.timestamp}
                   {msg.intent && <span className="ml-2 text-indigo-400 capitalize">· {msg.intent.replace('_', ' ')}</span>}

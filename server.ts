@@ -7,7 +7,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import dotenv from 'dotenv';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { Task, CalendarEvent, ExecutionPlan, ProgressLog, SystemNotification } from './src/types';
 
@@ -20,7 +19,9 @@ const PORT = Number(process.env.PORT) || 3000;
 app.use(express.json());
 
 // Persistent JSON Data Store file
-const DATA_FILE = path.join(process.cwd(), 'data-store.json');
+const DATA_FILE = process.env.VERCEL
+  ? path.join('/tmp', 'data-store.json')
+  : path.join(process.cwd(), 'data-store.json');
 
 // Initialize local data store if not present
 function initializeDataStore() {
@@ -177,8 +178,8 @@ function writeData(data: any) {
 }
 
 // Initialize Gemini safely to avoid startup crash if key is missing
-function getGeminiClient(): GoogleGenAI | null {
-  const apiKey = process.env.GEMINI_API_KEY;
+function getGeminiClient(customApiKey?: string): GoogleGenAI | null {
+  const apiKey = customApiKey || process.env.GEMINI_API_KEY;
   if (!apiKey || apiKey === "MY_GEMINI_API_KEY" || apiKey.trim() === "") {
     console.warn("GEMINI_API_KEY is not configured. Running in high-fidelity sandbox mode.");
     return null;
@@ -191,6 +192,36 @@ function getGeminiClient(): GoogleGenAI | null {
       }
     }
   });
+}
+
+// Helper to parse Gemini error response structure and type
+function parseGeminiError(err: any) {
+  const errMsg = err?.message || String(err);
+  let type = 'OTHER';
+  let status = 500;
+  let userMessage = 'An unexpected error occurred while communicating with the Gemini AI service.';
+
+  if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || err?.status === 400 || err?.status === 403) {
+    type = 'INVALID_KEY';
+    status = 400;
+    userMessage = 'The Gemini API key provided is invalid. Please verify the key and try again.';
+  } else if (errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('quota exceeded') || err?.status === 429) {
+    type = 'QUOTA_EXCEEDED';
+    status = 429;
+    userMessage = 'Gemini API quota exceeded or rate limit hit. Please try again later or check your billing settings.';
+  } else if (err?.status === 403) {
+    type = 'PERMISSION_DENIED';
+    status = 403;
+    userMessage = 'Permission denied for this Gemini model. Ensure your key has access to the specified model.';
+  }
+
+  return {
+    code: 'GEMINI_API_ERROR',
+    type,
+    status,
+    message: errMsg,
+    userMessage
+  };
 }
 
 // Helper to call generateContent with model fallback if the primary model experiences high demand (503)
@@ -261,7 +292,8 @@ app.post('/api/tasks', async (req, res) => {
   const { title, description, deadline, estimatedHours, category, priority } = req.body;
   const store = getData();
 
-  const aiClient = getGeminiClient();
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
   let taskMeta = {
     difficulty: 'Medium' as 'Low' | 'Medium' | 'High',
     risk: 30,
@@ -318,6 +350,10 @@ Return a JSON object exactly matching this schema:
       };
     } catch (e) {
       console.error("Gemini task analysis failed, using fallback:", e);
+      if (customApiKey) {
+        const errorDetails = parseGeminiError(e);
+        return res.status(errorDetails.status).json({ error: errorDetails });
+      }
     }
   } else {
     // Robust local fallback risk calculation
@@ -802,6 +838,38 @@ app.post('/api/calendar/connect', async (req, res) => {
 // AI Endpoints
 // -----------------------------------------------------
 
+// Test Gemini API key connection
+app.post('/api/ai/test-key', async (req, res) => {
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
+
+  if (!aiClient) {
+    return res.status(400).json({
+      error: {
+        code: 'GEMINI_API_ERROR',
+        type: 'INVALID_KEY',
+        message: 'No API key provided or configured.',
+        userMessage: 'Please provide a valid Gemini API key.'
+      }
+    });
+  }
+
+  try {
+    // Make a lightweight call to test key validity
+    await aiClient.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: 'Ping',
+      config: {
+        maxOutputTokens: 1
+      }
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    const errorDetails = parseGeminiError(err);
+    res.status(errorDetails.status).json({ error: errorDetails });
+  }
+});
+
 // Brain Dump endpoint - parses text and generates task list + schedule
 app.post('/api/ai/braindump', async (req, res) => {
   const { text, localTime, tasks: reqTasks, calendarEvents: reqEvents } = req.body;
@@ -810,7 +878,8 @@ app.post('/api/ai/braindump', async (req, res) => {
   const currentTasks = isStateless ? reqTasks : store.tasks;
   const currentEvents = isStateless ? reqEvents : store.calendarEvents;
 
-  const aiClient = getGeminiClient();
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
   let extracted: any = null;
 
   if (aiClient) {
@@ -905,6 +974,10 @@ Return a JSON object exactly matching this schema:
       extracted = JSON.parse(textResult.trim());
     } catch (e) {
       console.error("Gemini brain dump failed, using fallback:", e);
+      if (customApiKey) {
+        const errorDetails = parseGeminiError(e);
+        return res.status(errorDetails.status).json({ error: errorDetails });
+      }
     }
   }
 
@@ -1149,7 +1222,8 @@ app.post('/api/ai/recommend-action', async (req, res) => {
 
   const topTask = sortedTasks[0];
 
-  const aiClient = getGeminiClient();
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
   let reason = `This goal has a ${topTask.risk}% risk score based on remaining work estimates vs deadline. Start now to stay on schedule.`;
 
   if (aiClient) {
@@ -1174,6 +1248,10 @@ Keep the tone action-oriented, professional, and slightly intense. Do not use ma
       reason = response.text?.trim() || reason;
     } catch (e) {
       console.error("Gemini recommendation reasoning failed, using fallback:", e);
+      if (customApiKey) {
+        const errorDetails = parseGeminiError(e);
+        return res.status(errorDetails.status).json({ error: errorDetails });
+      }
     }
   }
 
@@ -1214,7 +1292,8 @@ app.post('/api/ai/plan', async (req, res) => {
     }
   }
 
-  const aiClient = getGeminiClient();
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
   let planItems: any[] = [];
 
   const existingCalendarTitles = currentEvents.map((e: any) => `${e.title} (${e.start} to ${e.end})`).join('\n');
@@ -1275,6 +1354,10 @@ Return a JSON array of focus sessions exactly matching this schema:
       planItems = JSON.parse(text.trim());
     } catch (e) {
       console.error("Gemini plan generation failed, using procedural planning:", e);
+      if (customApiKey) {
+        const errorDetails = parseGeminiError(e);
+        return res.status(errorDetails.status).json({ error: errorDetails });
+      }
     }
   }
 
@@ -1429,7 +1512,8 @@ app.post('/api/ai/checkin', async (req, res) => {
     else finalProgress = task.progress;
   }
 
-  const aiClient = getGeminiClient();
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
   let checkinResult = {
     progress: finalProgress,
     risk: task.risk,
@@ -1482,6 +1566,10 @@ Return a JSON object:
       };
     } catch (e) {
       console.error("Check-in Gemini analysis failed:", e);
+      if (customApiKey) {
+        const errorDetails = parseGeminiError(e);
+        return res.status(errorDetails.status).json({ error: errorDetails });
+      }
     }
   } else {
     // Procedural checkin calculations
@@ -1578,7 +1666,8 @@ app.post('/api/ai/chat', async (req, res) => {
   const currentEvents = isStateless ? calendarEvents : store.calendarEvents;
   const currentRescueMode = isStateless ? !!rescueMode : store.rescueMode;
 
-  const aiClient = getGeminiClient();
+  const customApiKey = req.headers['x-gemini-api-key'] as string | undefined;
+  const aiClient = getGeminiClient(customApiKey);
 
   if (aiClient) {
     try {
@@ -1798,6 +1887,10 @@ Return a JSON response matching:
       return res.json({ reply, intent, effect, storeState: store });
     } catch (err) {
       console.error("Gemini Orchestrator execution failed, using procedural AI reply:", err);
+      if (customApiKey) {
+        const errorDetails = parseGeminiError(err);
+        return res.status(errorDetails.status).json({ error: errorDetails });
+      }
     }
   }
 
@@ -2130,6 +2223,7 @@ async function startServer() {
   initializeDataStore();
 
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -2160,4 +2254,10 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+} else {
+  initializeDataStore();
+}
+
+export default app;

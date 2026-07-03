@@ -16,6 +16,7 @@ interface BrainDumpModalProps {
   onImportCompleted: () => void;
   tasks?: Task[];
   calendarEvents?: CalendarEvent[];
+  geminiApiKey?: string;
 }
 
 export default function BrainDumpModal({
@@ -23,7 +24,8 @@ export default function BrainDumpModal({
   onClose,
   onImportCompleted,
   tasks,
-  calendarEvents
+  calendarEvents,
+  geminiApiKey
 }: BrainDumpModalProps) {
   const [text, setText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -50,7 +52,8 @@ export default function BrainDumpModal({
         text,
         localTime,
         tasks,
-        calendarEvents
+        calendarEvents,
+        geminiApiKey
       );
 
       if (currentUser) {

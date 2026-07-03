@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Sparkles, CalendarPlus, CheckCircle2, RefreshCw, Layers } from 'lucide-react';
+import { Sparkles, CalendarPlus, CheckCircle2, RefreshCw, Layers, AlertCircle } from 'lucide-react';
 import { ExecutionPlan } from '../types';
 import { approveExecutionPlan } from '../api';
 import { auth, getUserPlans, getUserEvents, saveUserPlan, saveUserEvent } from '../firebase';
@@ -15,9 +15,10 @@ interface ExecutionPlanViewProps {
   onPlanApproved: () => void;
   onRegenerate: () => void;
   isGenerating: boolean;
+  planError?: any;
 }
 
-export default function ExecutionPlanView({ plan, onPlanApproved, onRegenerate, isGenerating }: ExecutionPlanViewProps) {
+export default function ExecutionPlanView({ plan, onPlanApproved, onRegenerate, isGenerating, planError }: ExecutionPlanViewProps) {
   const [isApproving, setIsApproving] = useState(false);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editPhase, setEditPhase] = useState('');
@@ -127,6 +128,28 @@ export default function ExecutionPlanView({ plan, onPlanApproved, onRegenerate, 
               <p className="text-xs font-semibold text-white uppercase tracking-wider">Orchestrating Calendar Slots...</p>
               <p className="text-[10px] text-zinc-400">Gemini is checking calendar conflicts and calculating focus energy intervals</p>
             </div>
+          </div>
+        ) : planError ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-4">
+            <div className="w-12 h-12 rounded-2xl bg-red-950/20 border border-red-900/40 flex items-center justify-center text-red-500 shadow-[0_0_20px_rgba(220,38,38,0.15)] animate-pulse">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5 max-w-[280px]">
+              <p className="text-xs font-bold text-white uppercase tracking-wider">Plan Generation Failure</p>
+              <p className="text-[10px] text-red-300 leading-relaxed font-sans">
+                {planError.userMessage || planError.message || 'An error occurred while generating the execution plan.'}
+              </p>
+            </div>
+            {(planError.type === 'INVALID_KEY' || planError.type === 'QUOTA_EXCEEDED' || planError.message?.includes('key')) && (
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('open-api-settings'));
+                }}
+                className="px-4 py-1.5 bg-red-900/40 hover:bg-red-800/60 border border-red-800/50 rounded-xl text-[10px] font-mono font-bold text-white transition duration-150 uppercase cursor-pointer"
+              >
+                Configure API Key
+              </button>
+            )}
           </div>
         ) : plan ? (
           <div className="space-y-4">
