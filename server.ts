@@ -18,6 +18,14 @@ const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 
+// Normalize Vercel pathing (Vercel strips "/api" prefix for serverless functions placed in /api)
+app.use((req, res, next) => {
+  if (req.url && !req.url.startsWith('/api')) {
+    req.url = '/api' + req.url;
+  }
+  next();
+});
+
 // Persistent JSON Data Store file
 const DATA_FILE = process.env.VERCEL
   ? path.join('/tmp', 'data-store.json')
